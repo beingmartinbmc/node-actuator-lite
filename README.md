@@ -121,7 +121,7 @@ This library uses the following key dependencies:
 
 ## 🛠️ Quick Start
 
-### Basic Setup
+### Standalone Mode (Traditional Servers)
 
 ```typescript
 import { Actuator, ActuatorOptions } from 'node-actuator-lite';
@@ -149,6 +149,48 @@ const actuator = new Actuator(actuatorOptions);
 await actuator.start();
 
 console.log(`Actuator running on port ${actuator.getPort()}`);
+```
+
+### Integration Mode (Serverless/Vercel)
+
+```typescript
+import express from 'express';
+import { ActuatorMiddleware, ActuatorMiddlewareOptions } from 'node-actuator-lite';
+
+const app = express();
+
+// Configure the actuator middleware
+const actuatorOptions: ActuatorMiddlewareOptions = {
+  basePath: '/actuator',
+  enableHealth: true,
+  enableMetrics: true,
+  enablePrometheus: true,
+  enableInfo: true,
+  enableEnv: true,
+  enableThreadDump: true,
+  enableHeapDump: false, // Disable in serverless
+  retryOptions: {
+    maxRetries: 3,
+    retryDelay: 100,
+    exponentialBackoff: true
+  }
+};
+
+// Create actuator middleware
+const actuatorMiddleware = new ActuatorMiddleware(actuatorOptions);
+
+// Add actuator routes to your Express app
+app.use(actuatorMiddleware.getRouter());
+
+// Your business logic routes
+app.get('/api/users', (req, res) => {
+  res.json({ users: [] });
+});
+
+app.listen(3000, () => {
+  console.log('App running on port 3000');
+  console.log('Actuator available at /actuator');
+});
 ```
 
 ### Health Monitoring
@@ -201,6 +243,57 @@ const responseTimeHistogram = actuator.addCustomMetric(
 requestCounter.inc({ method: 'GET', endpoint: '/api/users', status: '200' });
 responseTimeHistogram.observe({ method: 'GET', endpoint: '/api/users' }, 0.15);
 ```
+
+## 🔄 Deployment Modes
+
+Node Actuator Lite supports two deployment modes to accommodate different hosting environments:
+
+### Standalone Mode (`Actuator`)
+
+**Best for**: Traditional servers, Docker containers, Kubernetes deployments
+
+- Creates its own Express server
+- Runs on a separate port
+- Independent of your main application
+- Similar to how you might run a separate monitoring service
+
+```typescript
+const actuator = new Actuator(options);
+await actuator.start(); // Starts on separate port
+```
+
+### Integration Mode (`ActuatorMiddleware`)
+
+**Best for**: Serverless platforms (Vercel, AWS Lambda), Express applications
+
+- Integrates with your existing Express application
+- Uses the same port as your main app
+- Follows Spring Boot Actuator pattern
+- No additional server overhead
+
+```typescript
+const actuatorMiddleware = new ActuatorMiddleware(options);
+app.use(actuatorMiddleware.getRouter()); // Integrates with existing app
+```
+
+### Mode Comparison
+
+| Feature | Standalone (`Actuator`) | Integration (`ActuatorMiddleware`) |
+|---------|------------------------|-----------------------------------|
+| Server | Creates own Express server | Uses existing Express app |
+| Port | Separate port | Same port as main app |
+| Deployment | Traditional servers, Docker, K8s | Serverless, Vercel, Express apps |
+| Usage | `actuator.start()` | `app.use(actuatorMiddleware.getRouter())` |
+| Configuration | Includes `port` option | No `port` option needed |
+
+### Serverless Considerations
+
+When using `ActuatorMiddleware` in serverless environments:
+
+1. **Disable Heap Dumps**: Set `enableHeapDump: false` (not relevant in serverless)
+2. **Disable Disk Space Checks**: Set `healthOptions.includeDiskSpace: false`
+3. **Optimize Health Checks**: Keep them lightweight to avoid cold start penalties
+4. **Use Environment Variables**: Configure endpoints for different deployment stages
 
 ## 📊 Available Endpoints
 
