@@ -437,7 +437,10 @@ describe('Actuator Integration Tests', () => {
       expect(response.body.context).toHaveProperty('mappings');
       expect(response.body.context.mappings).toHaveProperty('dispatcherServlets');
       expect(response.body.context.mappings.dispatcherServlets).toHaveProperty('dispatcherServlet');
-      expect(Array.isArray(response.body.context.mappings.dispatcherServlets.dispatcherServlet)).toBe(true);
+      expect(response.body.context.mappings).toHaveProperty('actuator');
+      expect(response.body.context.mappings.actuator).toHaveProperty('totalRoutes');
+      expect(response.body.context.mappings.actuator).toHaveProperty('actuatorRoutes');
+      expect(response.body.context.mappings.actuator).toHaveProperty('customRoutes');
     });
   });
 
