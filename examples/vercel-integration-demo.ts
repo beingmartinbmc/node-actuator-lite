@@ -117,7 +117,7 @@ const userService = new UserService();
 const emailService = new EmailService();
 const databaseService = new DatabaseService();
 
-// Configure actuator middleware (no port needed for serverless!)
+// Configure actuator middleware (serverless-friendly - everything configured upfront!)
 const actuatorOptions: ActuatorMiddlewareOptions = {
   basePath: '/actuator',
   enableHealth: true,
@@ -135,19 +135,17 @@ const actuatorOptions: ActuatorMiddlewareOptions = {
     retryDelay: 100,
     exponentialBackoff: true
   },
-  customHealthChecks: [
-    // Database health check
-    async () => {
-      try {
-        const result = await databaseService.healthCheck();
-        return result;
-      } catch (error) {
-        return { status: 'DOWN', details: { error: error instanceof Error ? error.message : 'Unknown error' } };
-      }
+  // Serverless-friendly health checks configuration
+  healthChecks: [
+    {
+      name: 'database',
+      check: async () => await databaseService.healthCheck(),
+      enabled: true,
+      critical: true
     },
-    // Email service health check
-    async () => {
-      try {
+    {
+      name: 'email-service',
+      check: async () => {
         const stats = emailService.getStats();
         const totalEmails = stats.sent + stats.failed;
         const failureRate = totalEmails > 0 ? stats.failed / totalEmails : 0;
@@ -160,18 +158,44 @@ const actuatorOptions: ActuatorMiddlewareOptions = {
             failureRate: failureRate.toFixed(2)
           }
         };
-      } catch (error) {
-        return { status: 'DOWN', details: { error: error instanceof Error ? error.message : 'Unknown error' } };
-      }
+      },
+      enabled: true,
+      critical: false
     }
   ],
+  // Serverless-friendly metrics configuration
   customMetrics: [
-    { name: 'user_requests_total', help: 'Total number of user requests', type: 'counter' },
-    { name: 'email_sent_total', help: 'Total number of emails sent', type: 'counter' },
-    { name: 'email_failed_total', help: 'Total number of failed emails', type: 'counter' },
-    { name: 'database_queries_total', help: 'Total number of database queries', type: 'counter' },
-    { name: 'database_response_time', help: 'Database query response time', type: 'histogram' },
-    { name: 'active_users', help: 'Number of active users', type: 'gauge' }
+    { 
+      name: 'user_requests_total', 
+      help: 'Total number of user requests', 
+      type: 'counter',
+      labelNames: ['method', 'endpoint']
+    },
+    { 
+      name: 'email_sent_total', 
+      help: 'Total number of emails sent', 
+      type: 'counter' 
+    },
+    { 
+      name: 'email_failed_total', 
+      help: 'Total number of failed emails', 
+      type: 'counter' 
+    },
+    { 
+      name: 'database_queries_total', 
+      help: 'Total number of database queries', 
+      type: 'counter' 
+    },
+    { 
+      name: 'database_response_time', 
+      help: 'Database query response time', 
+      type: 'histogram' 
+    },
+    { 
+      name: 'active_users', 
+      help: 'Number of active users', 
+      type: 'gauge' 
+    }
   ],
   customBeans: {
     'userService': { name: 'UserService', type: 'service', instance: userService },
@@ -194,42 +218,19 @@ const actuatorOptions: ActuatorMiddlewareOptions = {
   healthOptions: {
     includeDiskSpace: false, // Disable disk space check in serverless
     includeProcess: true,
-    healthCheckTimeout: 5000,
-    customIndicators: [
-      {
-        name: 'database',
-        check: async () => await databaseService.healthCheck(),
-        enabled: true,
-        critical: true
-      },
-      {
-        name: 'email-service',
-        check: async () => {
-          const stats = emailService.getStats();
-          const failureRate = stats.sent + stats.failed > 0 ? stats.failed / (stats.sent + stats.failed) : 0;
-          
-          return {
-            status: failureRate < 0.2 ? 'UP' : 'DOWN',
-            details: { failureRate: failureRate.toFixed(2) }
-          };
-        },
-        enabled: true,
-        critical: false
-      }
-    ]
-  }
+    healthCheckTimeout: 5000
+  },
+  // Serverless-friendly route registration
+  routes: [
+    { method: 'GET', path: '/api/users/:id', handler: 'Get User Handler' },
+    { method: 'POST', path: '/api/users', handler: 'Create User Handler' },
+    { method: 'POST', path: '/api/email', handler: 'Send Email Handler' },
+    { method: 'GET', path: '/api/stats', handler: 'Get Stats Handler' }
+  ]
 };
 
-// Create actuator middleware
+// Create actuator middleware (everything configured upfront - no runtime API calls needed!)
 const actuatorMiddleware = new ActuatorMiddleware(actuatorOptions);
-
-// Get custom metrics
-const userRequestsCounter = actuatorMiddleware.getCustomMetric('user_requests_total');
-const emailSentCounter = actuatorMiddleware.getCustomMetric('email_sent_total');
-const emailFailedCounter = actuatorMiddleware.getCustomMetric('email_failed_total');
-const databaseQueriesCounter = actuatorMiddleware.getCustomMetric('database_queries_total');
-const databaseResponseTime = actuatorMiddleware.getCustomMetric('database_response_time');
-const activeUsersGauge = actuatorMiddleware.getCustomMetric('active_users');
 
 // Create main application
 const app = express();
@@ -241,7 +242,6 @@ app.use(actuatorMiddleware.getRouter());
 // Business logic routes
 app.get('/api/users/:id', async (req, res) => {
   try {
-    userRequestsCounter.inc();
     const user = await userService.getUser(req.params.id);
     res.json(user);
   } catch (error) {
@@ -251,7 +251,6 @@ app.get('/api/users/:id', async (req, res) => {
 
 app.post('/api/users', async (req, res) => {
   try {
-    userRequestsCounter.inc();
     const user = await userService.createUser(req.body);
     res.status(201).json(user);
   } catch (error) {
@@ -263,10 +262,8 @@ app.post('/api/email', async (req, res) => {
   try {
     const { to, subject, body } = req.body;
     const result = await emailService.sendEmail(to, subject, body);
-    emailSentCounter.inc();
     res.json(result);
   } catch (error) {
-    emailFailedCounter.inc();
     res.status(500).json({ error: 'Failed to send email' });
   }
 });
@@ -277,9 +274,6 @@ app.get('/api/stats', async (_req, res) => {
     await databaseService.query('SELECT COUNT(*) FROM users');
     const responseTime = Date.now() - startTime;
     
-    databaseQueriesCounter.inc();
-    databaseResponseTime.observe(responseTime);
-    
     res.json({
       userRequests: userService.getRequestCount(),
       emailStats: emailService.getStats(),
@@ -289,17 +283,6 @@ app.get('/api/stats', async (_req, res) => {
     res.status(500).json({ error: 'Failed to get stats' });
   }
 });
-
-// Update active users gauge periodically
-const activeUsersInterval = setInterval(() => {
-  const activeUsers = Math.floor(Math.random() * 100);
-  activeUsersGauge.set(activeUsers);
-}, 30000);
-
-// Store interval for cleanup
-if (typeof global !== 'undefined') {
-  (global as any).activeUsersInterval = activeUsersInterval;
-}
 
 // Start the application (for local development)
 async function startApp() {
@@ -355,10 +338,7 @@ if (require.main === module) {
 
 // Cleanup function for tests
 export function cleanup() {
-  if ((global as any).activeUsersInterval) {
-    clearInterval((global as any).activeUsersInterval);
-    delete (global as any).activeUsersInterval;
-  }
+  // No cleanup needed for serverless-friendly middleware
 }
 
 export { app, actuatorMiddleware, userService, emailService, databaseService }; 
