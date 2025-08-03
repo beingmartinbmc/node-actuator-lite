@@ -302,6 +302,27 @@ export class Actuator {
   }
 
   private setupRoutes(): void {
+    // Track actuator's own routes for mappings endpoint
+    const actuatorRoutes = [
+      { method: 'GET', path: `${this.basePath}/health`, handler: 'Health Check Endpoint' },
+      { method: 'GET', path: `${this.basePath}/metrics`, handler: 'Metrics Endpoint' },
+      { method: 'GET', path: `${this.basePath}/prometheus`, handler: 'Prometheus Metrics Endpoint' },
+      { method: 'GET', path: `${this.basePath}/info`, handler: 'Application Info Endpoint' },
+      { method: 'GET', path: `${this.basePath}/env`, handler: 'Environment Info Endpoint' },
+      { method: 'GET', path: `${this.basePath}/threaddump`, handler: 'Thread Dump Endpoint' },
+      { method: 'POST', path: `${this.basePath}/heapdump`, handler: 'Heap Dump Generation Endpoint' },
+      { method: 'GET', path: `${this.basePath}/mappings`, handler: 'Route Mappings Endpoint' },
+      { method: 'GET', path: `${this.basePath}/modules`, handler: 'Application Modules Endpoint' },
+      { method: 'GET', path: `${this.basePath}/configprops`, handler: 'Configuration Properties Endpoint' }
+    ];
+
+    // Add actuator routes to the routes array
+    actuatorRoutes.forEach(route => {
+      if (!this.routes.find(r => r.method === route.method && r.path === route.path)) {
+        this.routes.push(route);
+      }
+    });
+
     // Health endpoint
     if (this.options.enableHealth) {
       this.app.get(`${this.basePath}/health`, async (_req: Request, res: Response) => {
@@ -452,11 +473,31 @@ export class Actuator {
     if (this.options.enableMappings) {
       this.app.get(`${this.basePath}/mappings`, (_req: Request, res: Response) => {
         try {
+          // Group routes by method for better organization
+          const routesByMethod = this.routes.reduce((acc, route) => {
+            if (!acc[route.method]) {
+              acc[route.method] = [];
+            }
+            acc[route.method]!.push({
+              path: route.path,
+              handler: route.handler,
+              actuator: route.path.startsWith(this.basePath)
+            });
+            return acc;
+          }, {} as Record<string, Array<{ path: string; handler: string; actuator: boolean }>>);
+
           const mappings = {
             context: {
               mappings: {
                 dispatcherServlets: {
-                  dispatcherServlet: this.routes
+                  dispatcherServlet: routesByMethod
+                },
+                actuator: {
+                  description: 'Node Actuator Lite endpoints',
+                  basePath: this.basePath,
+                  totalRoutes: this.routes.length,
+                  actuatorRoutes: this.routes.filter(r => r.path.startsWith(this.basePath)).length,
+                  customRoutes: this.routes.filter(r => !r.path.startsWith(this.basePath)).length
                 }
               }
             }
@@ -955,6 +996,29 @@ export class Actuator {
 
   public registerRoute(method: string, path: string, handler: string): void {
     this.routes.push({ method, path, handler });
+  }
+
+  /**
+   * Register custom application routes to be included in the mappings endpoint
+   * @param method HTTP method (GET, POST, PUT, DELETE, etc.)
+   * @param path Route path
+   * @param handler Description of the handler function
+   */
+  public registerCustomRoute(method: string, path: string, handler: string): void {
+    // Don't register actuator routes as custom routes
+    if (!path.startsWith(this.basePath)) {
+      this.registerRoute(method, path, handler);
+    }
+  }
+
+  /**
+   * Register multiple custom routes at once
+   * @param routes Array of route objects
+   */
+  public registerCustomRoutes(routes: Array<{ method: string; path: string; handler: string }>): void {
+    routes.forEach(route => {
+      this.registerCustomRoute(route.method, route.path, route.handler);
+    });
   }
 
   // Add graceful shutdown support
