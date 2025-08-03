@@ -98,4 +98,12 @@ jspm_packages/
 .dynamodb/
 
 # TernJS port file
-.tern-port 
+.tern-port
+
+# Heap dumps and diagnostic files
+heapdumps/
+*.heapsnapshot
+*.heapsnapshot.gz
+
+# Test output files
+test-output.txt 
