@@ -9,6 +9,7 @@ import { validateConfig, ValidatedActuatorOptions } from '../utils/config';
 
 import { ErrorHandler } from '../utils/errorHandler';
 import { HeapDumpGenerator } from '../utils/heapDump';
+import { ThreadDumpCollector } from '../utils/threadDump';
 
 export interface ActuatorOptions {
   port?: number;
@@ -67,6 +68,7 @@ export class Actuator {
 
   private server?: any;
   private heapDumpGenerator?: HeapDumpGenerator;
+  private threadDumpCollector?: ThreadDumpCollector;
   private customMetrics: Map<string, any> = new Map();
 
   // Default Prometheus metrics
@@ -117,6 +119,11 @@ export class Actuator {
     // Initialize heap dump generator if enabled
     if (this.options.enableHeapDump) {
       this.heapDumpGenerator = new HeapDumpGenerator(this.options.heapDumpOptions);
+    }
+
+    // Initialize thread dump collector if enabled
+    if (this.options.enableThreadDump) {
+      this.threadDumpCollector = new ThreadDumpCollector();
     }
 
     // Initialize Prometheus metrics
@@ -569,33 +576,33 @@ export class Actuator {
 
     // Threaddump endpoint (Node.js equivalent of Spring Boot's /actuator/threaddump)
     if (this.options.enableThreadDump) {
-      this.app.get(`${this.basePath}/threaddump`, (_req: Request, res: Response) => {
+      this.app.get(`${this.basePath}/threaddump`, async (_req: Request, res: Response) => {
         try {
-          const threadDump = {
-            threads: [
-              {
-                threadId: process.pid,
-                threadName: 'main',
-                threadState: 'RUNNABLE',
-                blockedTime: 0,
-                blockedCount: 0,
-                waitedTime: 0,
-                waitedCount: 0,
-                lockName: null,
-                lockOwnerId: -1,
-                lockOwnerName: null,
-                inNative: false,
-                suspended: false,
-                stackTrace: this.getStackTrace(),
-                lockedMonitors: [],
-                lockedSynchronizers: []
-              }
-            ]
-          };
-          res.json(threadDump);
+          if (!this.threadDumpCollector) {
+            return res.status(500).json({ 
+              error: 'Thread dump collector not initialized' 
+            });
+          }
+
+          // Collect comprehensive thread dump with retry logic
+          const threadDump = await this.executeWithRetry(
+            () => this.threadDumpCollector!.collectThreadDump(),
+            'Thread dump collection'
+          );
+          
+          logger.debug({ 
+            totalThreads: threadDump.summary.totalThreads,
+            activeRequests: threadDump.summary.activeRequests 
+          }, 'Thread dump collected successfully');
+          
+          return res.json(threadDump);
         } catch (error) {
-          res.status(500).json({ 
-            error: error instanceof Error ? error.message : 'Unknown error' 
+          logger.error({ 
+            error: error instanceof Error ? error.message : 'Unknown error'
+          }, 'Thread dump collection failed after all retries');
+          
+          return res.status(500).json({ 
+            error: error instanceof Error ? error.message : 'Thread dump collection failed after multiple attempts'
           });
         }
       });
@@ -956,6 +963,11 @@ export class Actuator {
       logger.info('🛑 Shutting down Node Actuator Lite...');
       
       try {
+        // Cleanup thread dump collector
+        if (this.threadDumpCollector) {
+          this.threadDumpCollector.destroy();
+        }
+        
         // Close server if running
         if (this.server) {
           this.server.close((err?: Error) => {
@@ -1007,10 +1019,7 @@ export class Actuator {
     Actuator.httpMetricsInitialized = false;
   }
 
-  private getStackTrace(): string[] {
-    const stack = new Error().stack?.split('\n') || [];
-    return stack.slice(2); // Remove the first two lines (Error constructor and this method)
-  }
+
 
   /**
    * Helper method to execute a function with retry logic

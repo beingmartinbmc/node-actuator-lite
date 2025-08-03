@@ -1,4 +1,5 @@
 import request from 'supertest';
+// @ts-ignore
 import { app, actuator, cleanup, userService, emailService, databaseService } from '../examples/sample-app';
 
 describe('Sample Application Integration Tests', () => {
