@@ -28,8 +28,19 @@ export interface ActuatorMiddlewareOptions {
     compress?: boolean;
     maxDepth?: number;
   };
-  customHealthChecks?: Array<() => Promise<{ status: string; details?: any }>>;
-  customMetrics?: Array<{ name: string; help: string; type: 'counter' | 'gauge' | 'histogram' }>;
+  // Serverless-friendly configuration - everything configured upfront
+  healthChecks?: Array<{
+    name: string;
+    check: () => Promise<{ status: string; details?: any }>;
+    enabled?: boolean;
+    critical?: boolean;
+  }>;
+  customMetrics?: Array<{
+    name: string;
+    help: string;
+    type: 'counter' | 'gauge' | 'histogram';
+    labelNames?: string[];
+  }>;
   customBeans?: Record<string, any>;
   customConfigProps?: Record<string, any>;
   healthOptions?: {
@@ -38,18 +49,14 @@ export interface ActuatorMiddlewareOptions {
     diskSpaceThreshold?: number;
     diskSpacePath?: string;
     healthCheckTimeout?: number;
-    customIndicators?: Array<{
-      name: string;
-      check: () => Promise<{ status: string; details?: any }>;
-      enabled?: boolean;
-      critical?: boolean;
-    }>;
   };
   retryOptions?: {
     maxRetries?: number;
     retryDelay?: number;
     exponentialBackoff?: boolean;
   };
+  // Route registration for mappings endpoint
+  routes?: Array<{ method: string; path: string; handler: string }>;
 }
 
 export class ActuatorMiddleware {
@@ -65,10 +72,8 @@ export class ActuatorMiddleware {
   private threadDumpCollector?: ThreadDumpCollector;
   private customMetrics: Map<string, any> = new Map();
 
-  // Default Prometheus metrics (unused in middleware but kept for compatibility)
-  // private httpRequestsTotal!: Counter;
-  // private httpRequestDuration!: Histogram;
-  // private httpRequestsInProgress!: Gauge;
+  // Static properties for metrics
+  private static defaultMetricsInitialized = false;
 
   constructor(options: ActuatorMiddlewareOptions = {}) {
     // Validate configuration
@@ -104,6 +109,34 @@ export class ActuatorMiddleware {
     // Initialize Prometheus metrics
     this.initializePrometheusMetrics();
 
+    // Add custom health checks from options (serverless-friendly)
+    if (options.healthChecks) {
+      options.healthChecks.forEach(healthCheck => {
+        this.healthChecker.addHealthIndicator({
+          name: healthCheck.name,
+          check: healthCheck.check,
+          enabled: healthCheck.enabled ?? true,
+          critical: healthCheck.critical ?? false
+        });
+      });
+    }
+
+    // Add custom metrics from options (serverless-friendly)
+    if (options.customMetrics) {
+      options.customMetrics.forEach(metric => {
+        const options: { labelNames?: string[] } = {};
+        if (metric.labelNames) {
+          options.labelNames = metric.labelNames;
+        }
+        this.addCustomMetric(metric.name, metric.help, metric.type, options);
+      });
+    }
+
+    // Add custom routes from options (serverless-friendly)
+    if (options.routes) {
+      this.routes = [...options.routes];
+    }
+
     // Setup routes
     this.setupRoutes();
 
@@ -119,37 +152,6 @@ export class ActuatorMiddleware {
       this.threadDumpCollector = new ThreadDumpCollector();
     }
 
-    // Add custom health checks
-    validatedOptions.customHealthChecks.forEach(check => {
-      this.healthChecker.addHealthIndicator({
-        name: 'custom',
-        check,
-        enabled: true,
-        critical: false
-      });
-    });
-
-    // Add custom health indicators from options
-    if (validatedOptions.healthOptions?.customIndicators) {
-      validatedOptions.healthOptions.customIndicators.forEach(indicator => {
-        this.healthChecker.addHealthIndicator({
-          name: indicator.name,
-          check: indicator.check,
-          enabled: indicator.enabled ?? true,
-          critical: indicator.critical ?? false
-        });
-      });
-    }
-
-    // Add custom metrics
-    validatedOptions.customMetrics.forEach(metric => {
-      this.addCustomMetric(metric.name, metric.help, metric.type);
-    });
-
-    // Add custom beans and config props (these methods don't exist in InfoCollector, so we'll handle them differently)
-    // this.infoCollector.addCustomBeans(validatedOptions.customBeans);
-    // this.infoCollector.addCustomConfigProps(validatedOptions.customConfigProps);
-
     logger.info({ basePath: this.basePath }, 'ActuatorMiddleware initialized');
   }
 
@@ -158,33 +160,6 @@ export class ActuatorMiddleware {
       collectDefaultMetrics();
       ActuatorMiddleware.defaultMetricsInitialized = true;
     }
-
-    // HTTP metrics are not needed for middleware since it doesn't handle HTTP requests directly
-    // if (!ActuatorMiddleware.httpMetricsInitialized) {
-    //   ActuatorMiddleware.httpRequestsTotal = new Counter({
-    //     name: 'http_requests_total',
-    //     help: 'Total number of HTTP requests',
-    //     labelNames: ['method', 'route', 'status']
-    //   });
-
-    //   ActuatorMiddleware.httpRequestDuration = new Histogram({
-    //     name: 'http_request_duration_seconds',
-    //     help: 'HTTP request duration in seconds',
-    //     labelNames: ['method', 'route']
-    //   });
-
-    //   ActuatorMiddleware.httpRequestsInProgress = new Gauge({
-    //     name: 'http_requests_in_progress',
-    //     help: 'Number of HTTP requests currently in progress',
-    //     labelNames: ['method', 'route']
-    //   });
-
-    //   ActuatorMiddleware.httpMetricsInitialized = true;
-    // }
-
-    // this.httpRequestsTotal = ActuatorMiddleware.httpRequestsTotal;
-    // this.httpRequestDuration = ActuatorMiddleware.httpRequestDuration;
-    // this.httpRequestsInProgress = ActuatorMiddleware.httpRequestsInProgress;
   }
 
   private setupRoutes(): void {
@@ -516,14 +491,7 @@ export class ActuatorMiddleware {
     });
   }
 
-  // Static properties for metrics
-  private static defaultMetricsInitialized = false;
-  // private static httpMetricsInitialized = false;
-  // private static httpRequestsTotal: Counter;
-  // private static httpRequestDuration: Histogram;
-  // private static httpRequestsInProgress: Gauge;
-
-  // Public methods
+  // Public methods - simplified for serverless use
   public getRouter(): Router {
     return this.router;
   }
@@ -532,38 +500,13 @@ export class ActuatorMiddleware {
     return this.basePath;
   }
 
-  // Health Check API Methods
-  public addHealthIndicator(name: string, check: () => Promise<{ status: string; details?: any }>, options?: { enabled?: boolean; critical?: boolean }): void {
-    this.healthChecker.addHealthIndicator({
-      name,
-      check,
-      enabled: options?.enabled ?? true,
-      critical: options?.critical ?? false
-    });
+  // Static methods
+  public static resetDefaultMetricsFlag(): void {
+    ActuatorMiddleware.defaultMetricsInitialized = false;
   }
 
-  public addDatabaseHealthCheck(name: string, check: () => Promise<{ status: string; details?: any }>, options?: { enabled?: boolean; critical?: boolean }): void {
-    this.addHealthIndicator(name, check, { ...options, critical: options?.critical ?? true });
-  }
-
-  public addCacheHealthCheck(name: string, check: () => Promise<{ status: string; details?: any }>, options?: { enabled?: boolean; critical?: boolean }): void {
-    this.addHealthIndicator(name, check, { ...options, critical: options?.critical ?? false });
-  }
-
-  public addExternalServiceHealthCheck(name: string, check: () => Promise<{ status: string; details?: any }>, options?: { enabled?: boolean; critical?: boolean }): void {
-    this.addHealthIndicator(name, check, { ...options, critical: options?.critical ?? false });
-  }
-
-  public removeHealthIndicator(name: string): void {
-    this.healthChecker.removeHealthIndicator(name);
-  }
-
-  public getHealthIndicators(): Array<{ name: string; enabled: boolean; critical: boolean }> {
-    return this.healthChecker.getHealthIndicators();
-  }
-
-  // Metrics API Methods
-  public addCustomMetric(name: string, help: string, type: 'counter' | 'gauge' | 'histogram', options?: { labelNames?: string[] }): any {
+  // Private helper methods
+  private addCustomMetric(name: string, help: string, type: 'counter' | 'gauge' | 'histogram', options?: { labelNames?: string[] }): any {
     try {
       // For counters, ensure _total suffix
       if (type === 'counter' && !name.endsWith('_total')) {
@@ -599,59 +542,6 @@ export class ActuatorMiddleware {
     }
   }
 
-  public getCustomMetric(name: string): any {
-    return this.customMetrics.get(name);
-  }
-
-  // Heap dump API Methods
-  public async generateHeapDump(): Promise<any> {
-    if (!this.heapDumpGenerator) {
-      throw new Error('Heap dump is not enabled');
-    }
-    return await this.heapDumpGenerator.generateHeapDump();
-  }
-
-  public getHeapDumpStats(): any {
-    if (!this.heapDumpGenerator) {
-      throw new Error('Heap dump is not enabled');
-    }
-    return this.heapDumpGenerator.getHeapDumpStats();
-  }
-
-  public cleanupOldHeapDumps(maxAge?: number): void {
-    if (!this.heapDumpGenerator) {
-      throw new Error('Heap dump is not enabled');
-    }
-    this.heapDumpGenerator.cleanupOldDumps(maxAge);
-  }
-
-  // Route registration methods
-  public registerRoute(method: string, path: string, handler: string): void {
-    const route = { method: method.toUpperCase(), path, handler };
-    const existingIndex = this.routes.findIndex(r => r.method === route.method && r.path === route.path);
-    if (existingIndex >= 0) {
-      this.routes[existingIndex] = route;
-    } else {
-      this.routes.push(route);
-    }
-  }
-
-  public registerCustomRoute(method: string, path: string, handler: string): void {
-    this.registerRoute(method, path, handler);
-  }
-
-  public registerCustomRoutes(routes: Array<{ method: string; path: string; handler: string }>): void {
-    routes.forEach(route => {
-      this.registerRoute(route.method, route.path, route.handler);
-    });
-  }
-
-  // Static methods
-  public static resetDefaultMetricsFlag(): void {
-    ActuatorMiddleware.defaultMetricsInitialized = false;
-  }
-
-  // Private helper methods
   private async executeWithRetry<T>(
     operation: () => Promise<T>, 
     operationName: string

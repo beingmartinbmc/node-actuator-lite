@@ -159,7 +159,7 @@ import { ActuatorMiddleware, ActuatorMiddlewareOptions } from 'node-actuator-lit
 
 const app = express();
 
-// Configure the actuator middleware
+// Configure everything upfront - serverless-friendly!
 const actuatorOptions: ActuatorMiddlewareOptions = {
   basePath: '/actuator',
   enableHealth: true,
@@ -169,6 +169,24 @@ const actuatorOptions: ActuatorMiddlewareOptions = {
   enableEnv: true,
   enableThreadDump: true,
   enableHeapDump: false, // Disable in serverless
+  // Serverless-friendly health checks configuration
+  healthChecks: [
+    {
+      name: 'database',
+      check: async () => ({ status: 'UP', details: { connected: true } }),
+      enabled: true,
+      critical: true
+    }
+  ],
+  // Serverless-friendly metrics configuration
+  customMetrics: [
+    { 
+      name: 'api_requests_total', 
+      help: 'Total number of API requests', 
+      type: 'counter',
+      labelNames: ['method', 'endpoint']
+    }
+  ],
   retryOptions: {
     maxRetries: 3,
     retryDelay: 100,
@@ -176,7 +194,7 @@ const actuatorOptions: ActuatorMiddlewareOptions = {
   }
 };
 
-// Create actuator middleware
+// Create actuator middleware (everything configured upfront!)
 const actuatorMiddleware = new ActuatorMiddleware(actuatorOptions);
 
 // Add actuator routes to your Express app
@@ -284,7 +302,8 @@ app.use(actuatorMiddleware.getRouter()); // Integrates with existing app
 | Port | Separate port | Same port as main app |
 | Deployment | Traditional servers, Docker, K8s | Serverless, Vercel, Express apps |
 | Usage | `actuator.start()` | `app.use(actuatorMiddleware.getRouter())` |
-| Configuration | Includes `port` option | No `port` option needed |
+| Configuration | Runtime API calls | All upfront in constructor |
+| API Design | Instance methods | Constructor-only configuration |
 
 ### Serverless Considerations
 
@@ -292,8 +311,9 @@ When using `ActuatorMiddleware` in serverless environments:
 
 1. **Disable Heap Dumps**: Set `enableHeapDump: false` (not relevant in serverless)
 2. **Disable Disk Space Checks**: Set `healthOptions.includeDiskSpace: false`
-3. **Optimize Health Checks**: Keep them lightweight to avoid cold start penalties
-4. **Use Environment Variables**: Configure endpoints for different deployment stages
+3. **Configure Everything Upfront**: Use constructor options instead of runtime API calls
+4. **Use Environment Variables**: Configure endpoints using environment variables for different deployment stages
+5. **Keep Health Checks Lightweight**: Avoid cold start penalties
 
 ## 📊 Available Endpoints
 
