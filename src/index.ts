@@ -1,5 +1,6 @@
 // Main exports
 export { Actuator, ActuatorOptions } from './core/Actuator';
+export { ActuatorMiddleware, ActuatorMiddlewareOptions } from './core/ActuatorMiddleware';
 
 // Health exports
 export { HealthChecker, HealthStatus, HealthCheck } from './health/HealthChecker';
