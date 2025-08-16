@@ -1,7 +1,7 @@
 {
   "name": "node-actuator-lite",
-  "version": "1.1.2",
-  "description": "A lightweight Node.js actuator similar to Spring Boot actuator with Prometheus integration",
+  "version": "1.2.0",
+  "description": "A lightweight Node.js actuator similar to Spring Boot actuator with Prometheus integration and serverless support",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -21,7 +21,10 @@
     "health",
     "nodejs",
     "lightweight",
-    "spring-boot"
+    "spring-boot",
+    "serverless",
+    "vercel",
+    "lambda"
   ],
   "author": "Ankit Sharma <ankit.sharma199803@gmail.com>",
   "license": "MIT",
