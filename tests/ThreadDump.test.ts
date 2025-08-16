@@ -137,6 +137,10 @@ describe('ThreadDumpCollector', () => {
 
     test('should provide consistent data structure', async () => {
       const threadDump1 = await collector.collectThreadDump();
+      
+      // Add a small delay to ensure different timestamps
+      await new Promise(resolve => setTimeout(resolve, 10));
+      
       const threadDump2 = await collector.collectThreadDump();
 
       // Both should have the same structure

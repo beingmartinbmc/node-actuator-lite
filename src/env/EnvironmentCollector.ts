@@ -7,6 +7,7 @@ export interface EnvironmentData {
   arch: string;
   nodeVersion: string;
   processEnv: Record<string, string>;
+  environment: Record<string, string>;
   systemInfo: {
     hostname: string;
     platform: string;
@@ -30,6 +31,7 @@ export class EnvironmentCollector {
       arch: process.arch,
       nodeVersion: process.version,
       processEnv,
+      environment: processEnv,
       systemInfo
     };
   }

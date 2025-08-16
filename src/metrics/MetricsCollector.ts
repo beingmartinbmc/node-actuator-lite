@@ -1,4 +1,5 @@
 import os from 'os';
+import { Counter, Gauge, Histogram, Registry } from 'prom-client';
 
 export interface MetricsData {
   timestamp: string;
@@ -9,6 +10,54 @@ export interface MetricsData {
   uptime: number;
 }
 
+export interface FormattedMetricsData {
+  timestamp: string;
+  uptime: string;
+  system: {
+    hostname: string;
+    platform: string;
+    arch: string;
+    nodeVersion: string;
+    totalMemory: string;
+    freeMemory: string;
+    loadAverage: string[];
+    cpuCount: number;
+    uptime: number;
+  };
+  process: {
+    pid: number;
+    uptime: string;
+    version: string;
+    memoryUsage: {
+      rss: string;
+      heapTotal: string;
+      heapUsed: string;
+      external: string;
+    };
+    cpuUsage: {
+      user: string;
+      system: string;
+    };
+  };
+  memory: {
+    total: string;
+    used: string;
+    free: string;
+    usagePercentage: string;
+    processRss: string;
+    processHeapTotal: string;
+    processHeapUsed: string;
+    processExternal: string;
+  };
+  cpu: {
+    loadAverage: string[];
+    cpuCount: number;
+    loadPercentage: string;
+    processCpuUser: string;
+    processCpuSystem: string;
+  };
+}
+
 export interface SystemMetrics {
   hostname: string;
   platform: string;
@@ -17,6 +66,8 @@ export interface SystemMetrics {
   totalMemory: number;
   freeMemory: number;
   loadAverage: number[];
+  cpuCount: number;
+  uptime: number;
 }
 
 export interface ProcessMetrics {
@@ -55,8 +106,14 @@ export interface CpuMetrics {
 }
 
 export class MetricsCollector {
+  private lastCpuUsage: { user: number; system: number } | null = null;
+  private customMetrics: Map<string, Counter | Gauge | Histogram> = new Map();
+  private registry: Registry;
+
   constructor() {
-    // Constructor implementation
+    // Initialize CPU usage tracking
+    this.lastCpuUsage = process.cpuUsage();
+    this.registry = new Registry();
   }
 
   public async collect(): Promise<MetricsData> {
@@ -75,73 +132,7 @@ export class MetricsCollector {
     };
   }
 
-  private collectSystemMetrics(): SystemMetrics {
-    return {
-      hostname: os.hostname(),
-      platform: os.platform(),
-      arch: os.arch(),
-      nodeVersion: process.version,
-      totalMemory: os.totalmem(),
-      freeMemory: os.freemem(),
-      loadAverage: os.loadavg()
-    };
-  }
-
-  private collectProcessMetrics(): ProcessMetrics {
-    const memoryUsage = process.memoryUsage();
-    const cpuUsage = process.cpuUsage();
-
-    return {
-      pid: process.pid,
-      uptime: process.uptime(),
-      version: process.version,
-      memoryUsage: {
-        rss: memoryUsage.rss,
-        heapTotal: memoryUsage.heapTotal,
-        heapUsed: memoryUsage.heapUsed,
-        external: memoryUsage.external
-      },
-      cpuUsage: {
-        user: cpuUsage.user,
-        system: cpuUsage.system
-      }
-    };
-  }
-
-  private collectMemoryMetrics(): MemoryMetrics {
-    const totalMem = os.totalmem();
-    const freeMem = os.freemem();
-    const usedMem = totalMem - freeMem;
-    const memoryUsage = process.memoryUsage();
-
-    return {
-      total: totalMem,
-      used: usedMem,
-      free: freeMem,
-      usagePercentage: (usedMem / totalMem) * 100,
-      processRss: memoryUsage.rss,
-      processHeapTotal: memoryUsage.heapTotal,
-      processHeapUsed: memoryUsage.heapUsed,
-      processExternal: memoryUsage.external
-    };
-  }
-
-  private collectCpuMetrics(): CpuMetrics {
-    const loadAvg = os.loadavg();
-    const cpuCount = os.cpus().length;
-    const loadPercentage = (loadAvg[0]! / cpuCount) * 100;
-    const cpuUsage = process.cpuUsage();
-
-    return {
-      loadAverage: loadAvg,
-      cpuCount,
-      loadPercentage,
-      processCpuUser: cpuUsage.user,
-      processCpuSystem: cpuUsage.system
-    };
-  }
-
-  public async getFormattedMetrics(): Promise<Record<string, any>> {
+  public async getFormattedMetrics(): Promise<FormattedMetricsData> {
     const metrics = await this.collect();
     
     return {
@@ -154,7 +145,9 @@ export class MetricsCollector {
         nodeVersion: metrics.system.nodeVersion,
         totalMemory: `${(metrics.system.totalMemory / 1024 / 1024 / 1024).toFixed(2)} GB`,
         freeMemory: `${(metrics.system.freeMemory / 1024 / 1024 / 1024).toFixed(2)} GB`,
-        loadAverage: metrics.system.loadAverage.map((load: number) => load.toFixed(2))
+        loadAverage: metrics.system.loadAverage.map(load => load.toFixed(2)),
+        cpuCount: metrics.system.cpuCount,
+        uptime: metrics.system.uptime
       },
       process: {
         pid: metrics.process.pid,
@@ -182,62 +175,167 @@ export class MetricsCollector {
         processExternal: `${(metrics.memory.processExternal / 1024 / 1024).toFixed(2)} MB`
       },
       cpu: {
-        loadAverage: metrics.cpu.loadAverage.map((load: number) => load.toFixed(2)),
+        loadAverage: metrics.cpu.loadAverage.map(load => load.toFixed(2)),
         cpuCount: metrics.cpu.cpuCount,
         loadPercentage: `${metrics.cpu.loadPercentage.toFixed(2)}%`,
-        processCpuUser: `${(metrics.cpu.processCpuUser / 1000000).toFixed(2)}s`,
-        processCpuSystem: `${(metrics.cpu.processCpuSystem / 1000000).toFixed(2)}s`
+        processCpuUser: `${metrics.cpu.processCpuUser.toFixed(2)}s`,
+        processCpuSystem: `${metrics.cpu.processCpuSystem.toFixed(2)}s`
       }
     };
   }
 
-  // Custom metrics management
-  private customMetrics: Map<string, any> = new Map();
+  public addCustomMetric(
+    name: string,
+    help: string,
+    type: 'counter' | 'gauge' | 'histogram',
+    options: { labelNames?: string[] } = {}
+  ): Counter | Gauge | Histogram {
+    const metricOptions = {
+      name,
+      help,
+      labelNames: options.labelNames || [],
+      registers: [this.registry]
+    };
 
-  public addCustomMetric(name: string, help: string, type: 'counter' | 'gauge' | 'histogram', options?: { labelNames?: string[] }): any {
-    const { Counter, Gauge, Histogram } = require('prom-client');
-    
-    let metric: any;
-    
+    let metric: Counter | Gauge | Histogram;
+
     switch (type) {
       case 'counter':
-        metric = new Counter({
-          name,
-          help,
-          labelNames: options?.labelNames || []
-        });
+        metric = new Counter(metricOptions);
         break;
       case 'gauge':
-        metric = new Gauge({
-          name,
-          help,
-          labelNames: options?.labelNames || []
-        });
+        metric = new Gauge(metricOptions);
         break;
       case 'histogram':
-        metric = new Histogram({
-          name,
-          help,
-          labelNames: options?.labelNames || []
-        });
+        metric = new Histogram(metricOptions);
         break;
       default:
         throw new Error(`Unknown metric type: ${type}`);
     }
-    
+
     this.customMetrics.set(name, metric);
     return metric;
   }
 
-  public getCustomMetric(name: string): any {
+  public getCustomMetric(name: string): Counter | Gauge | Histogram | undefined {
     return this.customMetrics.get(name);
   }
 
   public removeCustomMetric(name: string): boolean {
-    return this.customMetrics.delete(name);
+    const metric = this.customMetrics.get(name);
+    if (metric) {
+      this.registry.removeSingleMetric(name);
+      this.customMetrics.delete(name);
+      return true;
+    }
+    return false;
   }
 
-  public getCustomMetrics(): Map<string, any> {
+  public getCustomMetrics(): Map<string, Counter | Gauge | Histogram> {
     return new Map(this.customMetrics);
+  }
+
+  public getRegistry(): Registry {
+    return this.registry;
+  }
+
+  private collectSystemMetrics(): SystemMetrics {
+    return {
+      hostname: os.hostname(),
+      platform: os.platform(),
+      arch: os.arch(),
+      nodeVersion: process.version,
+      totalMemory: os.totalmem(),
+      freeMemory: os.freemem(),
+      loadAverage: os.loadavg(),
+      cpuCount: os.cpus().length,
+      uptime: os.uptime()
+    };
+  }
+
+  private collectProcessMetrics(): ProcessMetrics {
+    const memoryUsage = process.memoryUsage();
+    const cpuUsage = process.cpuUsage();
+
+    return {
+      pid: process.pid,
+      uptime: process.uptime(),
+      version: process.version,
+      memoryUsage: {
+        rss: memoryUsage.rss,
+        heapTotal: memoryUsage.heapTotal,
+        heapUsed: memoryUsage.heapUsed,
+        external: memoryUsage.external
+      },
+      cpuUsage: {
+        user: cpuUsage.user,
+        system: cpuUsage.system
+      }
+    };
+  }
+
+  private collectMemoryMetrics(): MemoryMetrics {
+    const totalMemory = os.totalmem();
+    const freeMemory = os.freemem();
+    const usedMemory = totalMemory - freeMemory;
+    const memoryUsage = process.memoryUsage();
+
+    return {
+      total: totalMemory,
+      used: usedMemory,
+      free: freeMemory,
+      usagePercentage: (usedMemory / totalMemory) * 100,
+      processRss: memoryUsage.rss,
+      processHeapTotal: memoryUsage.heapTotal,
+      processHeapUsed: memoryUsage.heapUsed,
+      processExternal: memoryUsage.external
+    };
+  }
+
+  private collectCpuMetrics(): CpuMetrics {
+    const loadAverage = os.loadavg();
+    const cpuCount = os.cpus().length;
+    const currentCpuUsage = process.cpuUsage();
+    
+    let loadPercentage = 0;
+    let processCpuUser = 0;
+    let processCpuSystem = 0;
+
+    if (this.lastCpuUsage) {
+      const userDiff = currentCpuUsage.user - this.lastCpuUsage.user;
+      const systemDiff = currentCpuUsage.system - this.lastCpuUsage.system;
+      const totalDiff = userDiff + systemDiff;
+      
+      // Calculate CPU percentage (rough approximation)
+      loadPercentage = Math.min((totalDiff / 1000000) * 100, 100); // Convert to percentage
+      processCpuUser = userDiff / 1000000; // Convert to seconds
+      processCpuSystem = systemDiff / 1000000; // Convert to seconds
+    }
+
+    this.lastCpuUsage = currentCpuUsage;
+
+    return {
+      loadAverage,
+      cpuCount,
+      loadPercentage,
+      processCpuUser,
+      processCpuSystem
+    };
+  }
+
+  public getSystemInfo(): SystemMetrics {
+    return this.collectSystemMetrics();
+  }
+
+  public getProcessInfo(): ProcessMetrics {
+    return this.collectProcessMetrics();
+  }
+
+  public getMemoryInfo(): MemoryMetrics {
+    return this.collectMemoryMetrics();
+  }
+
+  public getCpuInfo(): CpuMetrics {
+    return this.collectCpuMetrics();
   }
 } 

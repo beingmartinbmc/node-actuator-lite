@@ -58,7 +58,7 @@ export class HeapDumpGenerator {
         return await this.generateFallbackHeapDump(filePath, startTime);
       }
     } catch (error) {
-      logger.error({ error: error instanceof Error ? error.message : 'Unknown error' }, 'Failed to generate heap dump');
+      logger.error('Failed to generate heap dump', { error: error instanceof Error ? error.message : 'Unknown error' });
       
       return {
         success: false,
@@ -99,11 +99,11 @@ export class HeapDumpGenerator {
           const fs = require('fs');
           const stats = fs.statSync(filePath);
           
-          logger.info({ 
-            filePath, 
-            fileSize: stats.size, 
-            duration 
-          }, 'Heap dump generated successfully using V8 writeHeapSnapshot');
+                    logger.info('Heap dump generated successfully using V8 writeHeapSnapshot', {
+            filePath,
+            fileSize: stats.size,
+            duration
+          });
 
           resolve({
             success: true,
@@ -119,7 +119,7 @@ export class HeapDumpGenerator {
         });
 
         stream.on('error', (error: Error) => {
-          logger.error({ error: error.message }, 'Error writing heap snapshot');
+          logger.error('Error writing heap snapshot', { error: error.message });
           resolve({
             success: false,
             error: error.message,
@@ -132,7 +132,7 @@ export class HeapDumpGenerator {
           });
         });
       } catch (error) {
-        logger.error({ error: error instanceof Error ? error.message : 'Unknown error' }, 'V8 heap dump failed, falling back to alternative method');
+        logger.error('V8 heap dump failed, falling back to alternative method', { error: error instanceof Error ? error.message : 'Unknown error' });
         resolve(this.generateFallbackHeapDump(filePath, startTime));
       }
     });
@@ -153,18 +153,18 @@ export class HeapDumpGenerator {
             const duration = endTime - startTime;
             
             if (err) {
-              logger.error({ error: err.message }, 'Heapdump module failed');
+              logger.error('Heapdump module failed', { error: err.message });
               resolve(this.generateManualHeapDump(filePath, startTime));
             } else {
               // Get file size
               const fs = require('fs');
               const stats = fs.statSync(filename);
               
-              logger.info({ 
-                filePath: filename, 
-                fileSize: stats.size, 
-                duration 
-              }, 'Heap dump generated successfully using heapdump module');
+                            logger.info('Heap dump generated successfully using heapdump module', {
+                filePath: filename,
+                fileSize: stats.size,
+                duration
+              });
 
               resolve({
                 success: true,
@@ -186,7 +186,7 @@ export class HeapDumpGenerator {
         return this.generateManualHeapDump(filePath, startTime);
       }
     } catch (error) {
-      logger.error({ error: error instanceof Error ? error.message : 'Unknown error' }, 'Fallback heap dump failed');
+      logger.error('Fallback heap dump failed', { error: error instanceof Error ? error.message : 'Unknown error' });
       return this.generateManualHeapDump(filePath, startTime);
     }
   }
@@ -229,11 +229,11 @@ export class HeapDumpGenerator {
       const fs = require('fs');
       const stats = fs.statSync(filePath);
 
-      logger.info({ 
-        filePath, 
-        fileSize: stats.size, 
-        duration 
-      }, 'Manual heap dump generated successfully');
+            logger.info('Manual heap dump generated successfully', {
+        filePath,
+        fileSize: stats.size,
+        duration
+      });
 
       return {
         success: true,
@@ -247,7 +247,7 @@ export class HeapDumpGenerator {
         }
       };
     } catch (error) {
-      logger.error({ error: error instanceof Error ? error.message : 'Unknown error' }, 'Manual heap dump failed');
+      logger.error('Manual heap dump failed', { error: error instanceof Error ? error.message : 'Unknown error' });
       
       return {
         success: false,
@@ -367,12 +367,12 @@ export class HeapDumpGenerator {
           
           if (now - stats.mtime.getTime() > maxAge) {
             fs.unlinkSync(filePath);
-            logger.info({ filePath }, 'Cleaned up old heap dump file');
+            logger.info('Cleaned up old heap dump file', { filePath });
           }
         }
       });
     } catch (error) {
-      logger.error({ error: error instanceof Error ? error.message : 'Unknown error' }, 'Failed to cleanup old heap dumps');
+      logger.error('Failed to cleanup old heap dumps', { error: error instanceof Error ? error.message : 'Unknown error' });
     }
   }
 
@@ -419,7 +419,7 @@ export class HeapDumpGenerator {
         files: fileStats
       };
     } catch (error) {
-      logger.error({ error: error instanceof Error ? error.message : 'Unknown error' }, 'Failed to get heap dump stats');
+      logger.error('Failed to get heap dump stats', { error: error instanceof Error ? error.message : 'Unknown error' });
       return { error: 'Failed to get heap dump statistics' };
     }
   }
