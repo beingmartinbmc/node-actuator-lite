@@ -30,7 +30,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git@github.com:beingmartinbmc/node-actuator-lite.git"
+    "url": "git+ssh://git@github.com/beingmartinbmc/node-actuator-lite.git"
   },
   "bugs": {
     "url": "https://github.com/beingmartinbmc/node-actuator-lite/issues"
