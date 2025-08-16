@@ -1,50 +1,115 @@
 # Node Actuator Lite - Usage Guide
 
-This guide shows you how to use Node Actuator Lite in your applications, with special focus on **serverless platforms** like Vercel, AWS Lambda, and traditional Node.js applications.
+This guide provides comprehensive examples and integration patterns for using Node Actuator Lite in various environments.
 
-## Quick Start
+## Table of Contents
 
-### Basic Setup
+- [Standalone Mode](#standalone-mode)
+- [Serverless Mode](#serverless-mode)
+- [Health Checks](#health-checks)
+- [Custom Metrics](#custom-metrics)
+- [Integration Examples](#integration-examples)
+- [Best Practices](#best-practices)
+
+## Standalone Mode
+
+### Basic Standalone Setup
 
 ```typescript
 import { LightweightActuator } from 'node-actuator-lite';
 
 const actuator = new LightweightActuator({
   port: 3001,
+  serverless: false,
   enableHealth: true,
   enableMetrics: true,
   enablePrometheus: true
 });
 
 await actuator.start();
+console.log(`Actuator running on port ${actuator.getPort()}`);
 ```
 
-### Serverless Setup (Vercel, AWS Lambda)
+### Advanced Standalone Configuration
 
 ```typescript
 import { LightweightActuator } from 'node-actuator-lite';
 
-// For serverless, use dynamic port
 const actuator = new LightweightActuator({
-  port: 0,  // Dynamic port assignment
+  port: 3001,
+  serverless: false,
+  basePath: '/actuator',
   enableHealth: true,
   enableMetrics: true,
-  enablePrometheus: true,
   enableInfo: true,
-  enableEnv: true
+  enableEnv: true,
+  enablePrometheus: true,
+  enableMappings: true,
+  enableBeans: true,
+  enableConfigProps: true,
+  enableThreadDump: true,
+  enableHeapDump: true,
+  heapDumpOptions: {
+    outputDir: './heapdumps',
+    includeTimestamp: true,
+    compress: false
+  },
+  healthOptions: {
+    includeDiskSpace: true,
+    includeProcess: true,
+    diskSpaceThreshold: 10 * 1024 * 1024 * 1024, // 10GB
+    healthCheckTimeout: 5000
+  }
 });
 
-// Initialize but don't start server (serverless platforms handle this)
-await actuator.initialize();
-
-export default actuator;
+await actuator.start();
 ```
 
-## 🌐 Serverless Integration
+### Testing Standalone Endpoints
+
+```bash
+# Health check
+curl http://localhost:3001/actuator/health
+
+# Metrics
+curl http://localhost:3001/actuator/metrics
+
+# Prometheus metrics
+curl http://localhost:3001/actuator/prometheus
+
+# Thread dump
+curl http://localhost:3001/actuator/threaddump
+
+# Heap dump
+curl http://localhost:3001/actuator/heapdump
+```
+
+## Serverless Mode
+
+### Basic Serverless Setup
+
+```typescript
+import { LightweightActuator } from 'node-actuator-lite';
+
+const actuator = new LightweightActuator({
+  serverless: true,
+  enableHealth: true,
+  enableMetrics: true,
+  enablePrometheus: true
+});
+
+// Initialize (no server started)
+await actuator.start();
+
+// Use direct data access methods
+const health = await actuator.getHealth();
+const metrics = await actuator.getMetrics();
+const prometheus = await actuator.getPrometheusMetrics();
+```
 
 ### Vercel Integration
 
-Create a Vercel API route for actuator endpoints:
+#### API Route Setup
 
 ```typescript
 // api/actuator/[...path].ts
@@ -52,12 +117,21 @@ import { LightweightActuator } from 'node-actuator-lite';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const actuator = new LightweightActuator({
-  port: 0,
+  serverless: true,
   enableHealth: true,
   enableMetrics: true,
   enablePrometheus: true,
   enableInfo: true,
-  enableEnv: true
+  enableEnv: true,
+  customHealthChecks: [
+    {
+      name: 'database',
+      check: async () => {
+        // Your database health check
+        return { status: 'UP', details: { connection: 'ok' } };
+      }
+    }
+  ]
 });
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -65,7 +139,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const pathString = Array.isArray(path) ? path.join('/') : path || '';
   
   try {
-    // Route to appropriate actuator endpoint
     switch (pathString) {
       case 'health':
         const health = await actuator.getHealth();
@@ -88,11 +161,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const env = await actuator.getEnvironment();
         res.json(env);
         break;
+      case 'threaddump':
+        const threadDump = actuator.getThreadDump();
+        res.json(threadDump);
+        break;
       default:
-        res.status(404).json({ error: 'Endpoint not found' });
+        res.status(404).json({ 
+          error: 'Endpoint not found',
+          availableEndpoints: ['health', 'metrics', 'prometheus', 'info', 'env', 'threaddump']
+        });
     }
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
+  }
+}
+```
+
+#### Vercel Configuration
+
+```json
+// vercel.json
+{
+  "functions": {
+    "api/actuator/[...path].ts": {
+      "maxDuration": 30
+    }
   }
 }
 ```
@@ -105,16 +198,14 @@ import { LightweightActuator } from 'node-actuator-lite';
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
 const actuator = new LightweightActuator({
-  port: 0,
+  serverless: true,
   enableHealth: true,
   enableMetrics: true,
-  enablePrometheus: true,
-  enableInfo: true,
-  enableEnv: true
+  enablePrometheus: true
 });
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
-  const path = event.pathParameters?.proxy || '';
+  const path = event.pathParameters?.path || '';
   
   try {
     switch (path) {
@@ -139,19 +230,55 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
           headers: { 'Content-Type': 'text/plain' },
           body: prometheus
         };
-      case 'info':
-        const info = await actuator.getInfo();
+      default:
         return {
-          statusCode: 200,
+          statusCode: 404,
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(info)
+          body: JSON.stringify({ error: 'Endpoint not found' })
         };
-      case 'env':
-        const env = await actuator.getEnvironment();
+    }
+  } catch (error) {
+    return {
+      statusCode: 500,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: 'Internal server error' })
+    };
+  }
+};
+```
+
+### Netlify Functions Integration
+
+```typescript
+// netlify/functions/actuator.ts
+import { LightweightActuator } from 'node-actuator-lite';
+import type { Handler } from '@netlify/functions';
+
+const actuator = new LightweightActuator({
+  serverless: true,
+  enableHealth: true,
+  enableMetrics: true,
+  enablePrometheus: true
+});
+
+export const handler: Handler = async (event) => {
+  const path = event.path.replace('/.netlify/functions/actuator/', '');
+  
+  try {
+    switch (path) {
+      case 'health':
+        const health = await actuator.getHealth();
         return {
           statusCode: 200,
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(env)
+          body: JSON.stringify(health)
+        };
+      case 'prometheus':
+        const prometheus = await actuator.getPrometheusMetrics();
+        return {
+          statusCode: 200,
+          headers: { 'Content-Type': 'text/plain' },
+          body: prometheus
         };
       default:
         return {
@@ -168,636 +295,506 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 };
 ```
 
-### Built-in HTTP Server Integration
+## Health Checks
 
-The library includes its own lightweight HTTP server implementation that you can use directly:
+### Built-in Health Checks
 
-```typescript
-import { LightweightServer } from 'node-actuator-lite';
-
-const server = new LightweightServer(3001, '/api');
-
-// Add your custom routes
-server.get('/users', async (_req, res) => {
-  res.status(200).json({ users: [] });
-});
-
-// Add actuator endpoints
-server.get('/actuator/health', async (_req, res) => {
-  try {
-    const actuator = new LightweightActuator({ port: 0 });
-    const health = await actuator.getHealth();
-    res.status(200).json(health);
-  } catch (error) {
-    res.status(500).json({ error: 'Health check failed' });
-  }
-});
-
-server.get('/actuator/metrics', async (_req, res) => {
-  try {
-    const actuator = new LightweightActuator({ port: 0 });
-    const metrics = await actuator.getMetrics();
-    res.status(200).json(metrics);
-  } catch (error) {
-    res.status(500).json({ error: 'Metrics collection failed' });
-  }
-});
-
-server.get('/actuator/prometheus', async (_req, res) => {
-  try {
-    const actuator = new LightweightActuator({ port: 0 });
-    const prometheus = await actuator.getPrometheusMetrics();
-    res.setHeader('Content-Type', 'text/plain');
-    res.status(200).send(prometheus);
-  } catch (error) {
-    res.status(500).json({ error: 'Prometheus metrics failed' });
-  }
-});
-
-// Start the server
-await server.start();
-console.log('Server running on port 3001');
-console.log('Actuator endpoints available at /actuator/*');
-```
-
-### Vanilla Node.js HTTP Integration
-
-You can also integrate with the built-in Node.js HTTP module:
-
-```typescript
-import { createServer } from 'http';
-import { LightweightActuator } from 'node-actuator-lite';
-
-const actuator = new LightweightActuator({ port: 0 });
-
-const server = createServer(async (req, res) => {
-  const url = new URL(req.url!, `http://${req.headers.host}`);
-  const path = url.pathname;
-
-  try {
-    switch (path) {
-      case '/actuator/health':
-        const health = await actuator.getHealth();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(health));
-        break;
-      
-      case '/actuator/metrics':
-        const metrics = await actuator.getMetrics();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(metrics));
-        break;
-      
-      case '/actuator/prometheus':
-        const prometheus = await actuator.getPrometheusMetrics();
-        res.writeHead(200, { 'Content-Type': 'text/plain' });
-        res.end(prometheus);
-        break;
-      
-      default:
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Endpoint not found' }));
-    }
-  } catch (error) {
-    res.writeHead(500, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Internal server error' }));
-  }
-});
-
-server.listen(3000, () => {
-  console.log('Server running on port 3000');
-  console.log('Actuator endpoints available at /actuator/*');
-});
-```
-
-## Adding Real Health Checks
-
-### Database Health Check
-
-```typescript
-import { LightweightActuator } from 'node-actuator-lite';
-
-const actuator = new LightweightActuator({
-  port: 3001,
-  customHealthChecks: [
-    // PostgreSQL health check
-    async () => {
-      try {
-        const { Client } = require('pg');
-        const client = new Client({
-          connectionString: process.env.DATABASE_URL
-        });
-        
-        await client.connect();
-        await client.query('SELECT 1');
-        await client.end();
-        
-        return {
-          status: 'UP',
-          details: { database: 'PostgreSQL', connected: true }
-        };
-      } catch (error) {
-        return {
-          status: 'DOWN',
-          details: { 
-            database: 'PostgreSQL', 
-            error: error.message 
-          }
-        };
-      }
-    },
-    
-    // Redis health check
-    async () => {
-      try {
-        const redis = require('redis');
-        const client = redis.createClient({
-          url: process.env.REDIS_URL
-        });
-        
-        await client.connect();
-        await client.ping();
-        await client.disconnect();
-        
-        return {
-          status: 'UP',
-          details: { cache: 'Redis', connected: true }
-        };
-      } catch (error) {
-        return {
-          status: 'DOWN',
-          details: { 
-            cache: 'Redis', 
-            error: error.message 
-          }
-        };
-      }
-    }
-  ]
-});
-
-await actuator.start();
-```
-
-### External API Health Check
+The actuator includes built-in health checks for disk space and process health:
 
 ```typescript
 const actuator = new LightweightActuator({
-  port: 3001,
+  healthOptions: {
+    includeDiskSpace: true,        // Monitor disk space
+    includeProcess: true,          // Monitor process health
+    diskSpaceThreshold: 10 * 1024 * 1024 * 1024, // 10GB minimum
+    diskSpacePath: process.cwd(),  // Path to monitor
+    healthCheckTimeout: 5000       // 5 second timeout
+  }
+});
+```
+
+### Custom Health Checks
+
+#### Named Health Checks (Recommended)
+
+```typescript
+const actuator = new LightweightActuator({
   customHealthChecks: [
-    async () => {
-      try {
-        const response = await fetch('https://api.external-service.com/health');
-        
-        if (response.ok) {
+    {
+      name: 'database',
+      check: async () => {
+        try {
+          // Database connection check
+          const connection = await db.ping();
           return {
             status: 'UP',
-            details: { 
-              service: 'External API',
+            details: {
+              connection: 'established',
+              responseTime: connection.responseTime
+            }
+          };
+        } catch (error) {
+          return {
+            status: 'DOWN',
+            details: {
+              error: error.message,
+              connection: 'failed'
+            }
+          };
+        }
+      }
+    },
+    {
+      name: 'external-api',
+      check: async () => {
+        try {
+          const response = await fetch('https://api.example.com/health');
+          const data = await response.json();
+          
+          return {
+            status: response.ok ? 'UP' : 'DOWN',
+            details: {
+              endpoint: 'https://api.example.com/health',
               responseTime: response.headers.get('x-response-time'),
               statusCode: response.status
             }
           };
-        } else {
+        } catch (error) {
           return {
             status: 'DOWN',
-            details: { 
-              service: 'External API',
-              statusCode: response.status,
-              error: 'Service returned non-OK status'
+            details: {
+              error: error.message,
+              endpoint: 'https://api.example.com/health'
             }
           };
         }
-      } catch (error) {
-        return {
-          status: 'DOWN',
-          details: { 
-            service: 'External API',
-            error: error.message 
-          }
-        };
+      }
+    },
+    {
+      name: 'redis',
+      check: async () => {
+        try {
+          const redis = require('redis');
+          const client = redis.createClient();
+          await client.ping();
+          await client.quit();
+          
+          return {
+            status: 'UP',
+            details: {
+              connection: 'established'
+            }
+          };
+        } catch (error) {
+          return {
+            status: 'DOWN',
+            details: {
+              error: error.message
+            }
+          };
+        }
       }
     }
   ]
 });
 ```
 
-### Serverless-Specific Health Checks
+#### Legacy Function Health Checks
 
 ```typescript
 const actuator = new LightweightActuator({
-  port: 0,
   customHealthChecks: [
-    // Check environment variables (important for serverless)
     async () => {
-      const requiredEnvVars = ['DATABASE_URL', 'API_KEY', 'NODE_ENV'];
-      const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
-      
-      if (missingVars.length === 0) {
-        return {
-          status: 'UP',
-          details: { environment: 'All required variables present' }
-        };
-      } else {
-        return {
-          status: 'DOWN',
-          details: { 
-            environment: 'Missing required variables',
-            missing: missingVars
-          }
-        };
-      }
+      // Simple health check
+      return { status: 'UP', details: { message: 'All systems operational' } };
     },
-    
-    // Check function timeout (serverless-specific)
     async () => {
-      const startTime = Date.now();
-      await new Promise(resolve => setTimeout(resolve, 100)); // Simulate work
-      const duration = Date.now() - startTime;
-      
-      return {
-        status: 'UP',
-        details: { 
-          performance: 'Function responding within limits',
-          responseTime: `${duration}ms`
-        }
-      };
+      // Another health check
+      return { status: 'UP', details: { uptime: process.uptime() } };
     }
   ]
 });
+```
+
+### Health Check Response Format
+
+```json
+{
+  "status": "UP",
+  "details": {
+    "checks": [
+      {
+        "name": "diskSpace",
+        "status": "UP",
+        "details": {
+          "total": 500000000000,
+          "free": 300000000000,
+          "threshold": 10737418240,
+          "path": "/app"
+        }
+      },
+      {
+        "name": "database",
+        "status": "UP",
+        "details": {
+          "connection": "established",
+          "responseTime": 15
+        }
+      }
+    ],
+    "responseTime": "25.50ms"
+  },
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  "uptime": 3600.5
+}
 ```
 
 ## Custom Metrics
 
-### Adding Custom Prometheus Metrics
+### Defining Custom Metrics
 
 ```typescript
-import { LightweightActuator } from 'node-actuator-lite';
-
 const actuator = new LightweightActuator({
-  port: 3001,
   customMetrics: [
     {
-      name: 'http_requests_total',
-      help: 'Total number of HTTP requests',
+      name: 'app_requests_total',
+      help: 'Total number of application requests',
       type: 'counter'
     },
     {
-      name: 'http_request_duration_seconds',
-      help: 'HTTP request duration in seconds',
+      name: 'app_response_time_seconds',
+      help: 'Application response time in seconds',
       type: 'histogram'
     },
     {
-      name: 'active_connections',
-      help: 'Number of active database connections',
+      name: 'app_active_users',
+      help: 'Number of active users',
+      type: 'gauge'
+    },
+    {
+      name: 'app_error_rate',
+      help: 'Application error rate percentage',
       type: 'gauge'
     }
   ]
 });
+```
 
-await actuator.start();
+### Using Custom Metrics
 
-// Use the metrics in your application
-const requestCounter = actuator.getCustomMetric('http_requests_total');
-const requestDuration = actuator.getCustomMetric('http_request_duration_seconds');
-const activeConnections = actuator.getCustomMetric('active_connections');
+```typescript
+// Get metric instances
+const requestCounter = actuator.getCustomMetric('app_requests_total');
+const responseTimeHistogram = actuator.getCustomMetric('app_response_time_seconds');
+const activeUsersGauge = actuator.getCustomMetric('app_active_users');
+const errorRateGauge = actuator.getCustomMetric('app_error_rate');
 
 // Increment counter
 requestCounter.inc();
 
-// Record duration
-requestDuration.observe(0.15);
+// Increment with labels
+requestCounter.inc({ method: 'GET', endpoint: '/api/users' });
+
+// Record histogram
+responseTimeHistogram.observe(0.15); // 150ms
 
 // Set gauge value
-activeConnections.set(5);
+activeUsersGauge.set(42);
+
+// Update error rate
+errorRateGauge.set(2.5); // 2.5%
 ```
 
-### Serverless-Specific Metrics
+### Metrics in Prometheus Format
 
-```typescript
-const actuator = new LightweightActuator({
-  port: 0,
-  customMetrics: [
-    {
-      name: 'function_invocations_total',
-      help: 'Total number of function invocations',
-      type: 'counter'
-    },
-    {
-      name: 'function_duration_seconds',
-      help: 'Function execution duration',
-      type: 'histogram'
-    },
-    {
-      name: 'cold_starts_total',
-      help: 'Total number of cold starts',
-      type: 'counter'
-    },
-    {
-      name: 'memory_usage_bytes',
-      help: 'Current memory usage in bytes',
-      type: 'gauge'
-    }
-  ]
-});
+```prometheus
+# HELP app_requests_total Total number of application requests
+# TYPE app_requests_total counter
+app_requests_total{method="GET",endpoint="/api/users"} 150
 
-// Track function invocations
-const invocationsCounter = actuator.getCustomMetric('function_invocations_total');
-const durationHistogram = actuator.getCustomMetric('function_duration_seconds');
-const coldStartsCounter = actuator.getCustomMetric('cold_starts_total');
-const memoryGauge = actuator.getCustomMetric('memory_usage_bytes');
+# HELP app_response_time_seconds Application response time in seconds
+# TYPE app_response_time_seconds histogram
+app_response_time_seconds_bucket{le="0.1"} 45
+app_response_time_seconds_bucket{le="0.5"} 120
+app_response_time_seconds_bucket{le="1"} 150
+app_response_time_seconds_sum 75.5
+app_response_time_seconds_count 150
 
-// In your function handler
-export const handler = async (event, context) => {
-  const startTime = Date.now();
-  
-  // Increment invocation counter
-  invocationsCounter.inc();
-  
-  // Check if this is a cold start
-  if (context.getRemainingTimeInMillis() === context.getRemainingTimeInMillis()) {
-    coldStartsCounter.inc();
-  }
-  
-  try {
-    // Your function logic here
-    const result = await processEvent(event);
-    
-    // Record duration
-    const duration = (Date.now() - startTime) / 1000;
-    durationHistogram.observe(duration);
-    
-    // Update memory usage
-    const memUsage = process.memoryUsage();
-    memoryGauge.set(memUsage.heapUsed);
-    
-    return result;
-  } catch (error) {
-    // Handle errors
-    throw error;
-  }
-};
+# HELP app_active_users Number of active users
+# TYPE app_active_users gauge
+app_active_users 42
+
+# HELP app_error_rate Application error rate percentage
+# TYPE app_error_rate gauge
+app_error_rate 2.5
 ```
 
-## Configuration Options
+## Integration Examples
 
-### Full Configuration Example
+### Express.js Integration
 
 ```typescript
+import express from 'express';
 import { LightweightActuator } from 'node-actuator-lite';
 
+const app = express();
+const port = 3000;
+
+// Create actuator for direct data access
 const actuator = new LightweightActuator({
-  // Server configuration
-  port: 3001,                    // Port number (0 for dynamic)
-  basePath: '/actuator',         // Base path for endpoints
-  
-  // Enable/disable features
-  enableHealth: true,            // Health endpoint
-  enableMetrics: true,           // Metrics endpoint
-  enablePrometheus: true,        // Prometheus metrics
-  enableInfo: true,              // Info endpoint
-  enableEnv: true,               // Environment endpoint
-  enableThreadDump: true,        // Thread dump endpoint
-  enableHeapDump: true,          // Heap dump endpoint
-  
-  // Custom health checks
-  customHealthChecks: [
-    async () => ({ status: 'UP', details: { custom: 'check' } })
-  ],
-  
-  // Custom metrics
-  customMetrics: [
-    { name: 'custom_counter', help: 'A custom counter', type: 'counter' }
-  ],
-  
-  // Health check options
-  healthOptions: {
-    includeDiskSpace: true,      // Include disk space check
-    includeProcess: true,        // Include process check
-    diskSpaceThreshold: 90,      // Disk space threshold (%)
-    diskSpacePath: '/',          // Path to check disk space
-    healthCheckTimeout: 5000     // Health check timeout (ms)
-  }
-});
-
-await actuator.start();
-```
-
-## Available Endpoints
-
-Once started, the actuator provides these endpoints:
-
-### Health & Monitoring
-- `GET /actuator/health` - Application health status
-- `GET /actuator/metrics` - Application metrics (JSON format)
-- `GET /actuator/prometheus` - Prometheus metrics format
-
-### Information
-- `GET /actuator/info` - Application information
-- `GET /actuator/env` - Environment variables
-
-### Advanced Diagnostics
-- `GET /actuator/threaddump` - Detailed thread dump analysis
-- `GET /actuator/heapdump` - V8 heap snapshot and memory analysis
-
-### Example Responses
-
-**Health Check Response:**
-```json
-{
-  "status": "UP",
-  "timestamp": "2024-01-15T10:30:00.000Z",
-  "uptime": 3600,
-  "pid": 12345,
-  "details": {
-    "disk": {
-      "status": "UP",
-      "freeSpace": 107374182400,
-      "totalSpace": 1073741824000
-    },
-    "process": {
-      "status": "UP",
-      "uptime": 3600,
-      "memoryUsage": {
-        "rss": 52428800,
-        "heapTotal": 20971520,
-        "heapUsed": 10485760
-      }
-    },
-    "checks": [
-      {
-        "name": "database",
-        "status": "UP",
-        "details": { "database": "PostgreSQL", "connected": true }
-      }
-    ]
-  }
-}
-```
-
-**Metrics Response:**
-```json
-{
-  "timestamp": "2024-01-15T10:30:00.000Z",
-  "system": {
-    "hostname": "server-1",
-    "platform": "linux",
-    "arch": "x64",
-    "nodeVersion": "v18.0.0",
-    "totalMemory": 8589934592,
-    "freeMemory": 4294967296,
-    "loadAverage": [1.5, 1.2, 1.0],
-    "cpuCount": 8,
-    "uptime": 86400
-  },
-  "process": {
-    "pid": 12345,
-    "uptime": 3600,
-    "version": "v18.0.0",
-    "memoryUsage": {
-      "rss": 52428800,
-      "heapTotal": 20971520,
-      "heapUsed": 10485760,
-      "external": 2097152
-    },
-    "cpuUsage": {
-      "user": 1000000,
-      "system": 500000
-    }
-  }
-}
-```
-
-## Best Practices
-
-### 1. Error Handling
-
-```typescript
-try {
-  await actuator.start();
-  console.log(`Actuator started on port ${actuator.getPort()}`);
-} catch (error) {
-  console.error('Failed to start actuator:', error);
-  process.exit(1);
-}
-```
-
-### 2. Graceful Shutdown
-
-```typescript
-process.on('SIGINT', async () => {
-  console.log('Shutting down...');
-  await actuator.stop();
-  process.exit(0);
-});
-
-process.on('SIGTERM', async () => {
-  console.log('Shutting down...');
-  await actuator.stop();
-  process.exit(0);
-});
-```
-
-### 3. Environment-Specific Configuration
-
-```typescript
-const actuator = new LightweightActuator({
-  port: process.env.ACTUATOR_PORT || 3001,
-  basePath: process.env.ACTUATOR_BASE_PATH || '/actuator',
-  enableHealth: true,
-  enableMetrics: true,
-  enablePrometheus: process.env.NODE_ENV === 'production',
-  enableThreadDump: process.env.NODE_ENV === 'development',
-  enableHeapDump: process.env.NODE_ENV === 'development',
-  customHealthChecks: [
-    // Add environment-specific health checks
-    ...(process.env.NODE_ENV === 'production' ? [productionHealthCheck] : [])
-  ]
-});
-```
-
-### 4. Security Considerations
-
-- Use environment variables for sensitive configuration
-- Consider adding authentication for production deployments
-- Use HTTPS in production environments
-- Limit access to actuator endpoints in production
-- For serverless, use API Gateway authentication or similar
-
-### 5. Serverless Best Practices
-
-```typescript
-// Initialize actuator once (outside handler)
-const actuator = new LightweightActuator({
-  port: 0,
+  serverless: true,
   enableHealth: true,
   enableMetrics: true,
   enablePrometheus: true
 });
 
-// Reuse in multiple function invocations
-export const handler = async (event, context) => {
-  // Use actuator methods without starting server
-  const health = await actuator.getHealth();
-  const metrics = await actuator.getMetrics();
-  
-  // Your function logic here
-  return { health, metrics };
-};
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Port Already in Use**
-   ```typescript
-   const actuator = new LightweightActuator({
-     port: 0  // Use dynamic port
-   });
-   ```
-
-2. **Health Checks Failing**
-   - Check if external services are accessible
-   - Verify database connection strings
-   - Ensure proper error handling in custom health checks
-
-3. **Metrics Not Updating**
-   - Verify custom metrics are properly registered
-   - Check if metrics are being incremented/updated in your code
-   - Ensure Prometheus client is properly configured
-
-4. **Serverless Issues**
-   - Don't start the internal server in serverless environments
-   - Use `port: 0` configuration
-   - Initialize actuator outside the handler function
-   - Handle cold starts appropriately
-
-### Debug Mode
-
-Enable debug logging by setting the environment variable:
-
-```bash
-LOG_LEVEL=DEBUG node your-app.js
-```
-
-This will provide detailed logging about actuator operations, health checks, and metrics collection.
-
-### Serverless Debug
-
-For serverless platforms, add logging to your handler:
-
-```typescript
-export const handler = async (event, context) => {
-  console.log('Function invoked:', { event, context });
-  
+// Add actuator endpoints to Express
+app.get('/actuator/health', async (req, res) => {
   try {
     const health = await actuator.getHealth();
-    console.log('Health check result:', health);
+    res.json(health);
+  } catch (error) {
+    res.status(500).json({ error: 'Health check failed' });
+  }
+});
+
+app.get('/actuator/metrics', async (req, res) => {
+  try {
+    const metrics = await actuator.getMetrics();
+    res.json(metrics);
+  } catch (error) {
+    res.status(500).json({ error: 'Metrics collection failed' });
+  }
+});
+
+app.get('/actuator/prometheus', async (req, res) => {
+  try {
+    const prometheus = await actuator.getPrometheusMetrics();
+    res.setHeader('Content-Type', 'text/plain');
+    res.send(prometheus);
+  } catch (error) {
+    res.status(500).json({ error: 'Prometheus metrics failed' });
+  }
+});
+
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+});
+```
+
+### Fastify Integration
+
+```typescript
+import Fastify from 'fastify';
+import { LightweightActuator } from 'node-actuator-lite';
+
+const fastify = Fastify();
+const port = 3000;
+
+const actuator = new LightweightActuator({
+  serverless: true,
+  enableHealth: true,
+  enableMetrics: true,
+  enablePrometheus: true
+});
+
+// Add actuator routes
+fastify.get('/actuator/health', async (request, reply) => {
+  try {
+    const health = await actuator.getHealth();
     return health;
   } catch (error) {
-    console.error('Health check failed:', error);
-    throw error;
+    reply.status(500).send({ error: 'Health check failed' });
   }
-};
-``` 
+});
+
+fastify.get('/actuator/prometheus', async (request, reply) => {
+  try {
+    const prometheus = await actuator.getPrometheusMetrics();
+    reply.header('Content-Type', 'text/plain');
+    return prometheus;
+  } catch (error) {
+    reply.status(500).send({ error: 'Prometheus metrics failed' });
+  }
+});
+
+fastify.listen({ port }, (err) => {
+  if (err) throw err;
+  console.log(`Server running on port ${port}`);
+});
+```
+
+### Koa Integration
+
+```typescript
+import Koa from 'koa';
+import Router from '@koa/router';
+import { LightweightActuator } from 'node-actuator-lite';
+
+const app = new Koa();
+const router = new Router();
+
+const actuator = new LightweightActuator({
+  serverless: true,
+  enableHealth: true,
+  enableMetrics: true,
+  enablePrometheus: true
+});
+
+// Add actuator routes
+router.get('/actuator/health', async (ctx) => {
+  try {
+    const health = await actuator.getHealth();
+    ctx.body = health;
+  } catch (error) {
+    ctx.status = 500;
+    ctx.body = { error: 'Health check failed' };
+  }
+});
+
+router.get('/actuator/prometheus', async (ctx) => {
+  try {
+    const prometheus = await actuator.getPrometheusMetrics();
+    ctx.set('Content-Type', 'text/plain');
+    ctx.body = prometheus;
+  } catch (error) {
+    ctx.status = 500;
+    ctx.body = { error: 'Prometheus metrics failed' };
+  }
+});
+
+app.use(router.routes());
+app.listen(3000);
+```
+
+## Best Practices
+
+### 1. Environment Detection
+
+```typescript
+// Auto-detect serverless environments
+const isServerless = process.env['VERCEL_ENV'] || 
+                    process.env['NETLIFY'] || 
+                    process.env['AWS_LAMBDA_FUNCTION_NAME'];
+
+const actuator = new LightweightActuator({
+  serverless: isServerless,
+  // ... other options
+});
+```
+
+### 2. Error Handling
+
+```typescript
+// Always handle errors in health checks
+customHealthChecks: [
+  {
+    name: 'database',
+    check: async () => {
+      try {
+        // Health check logic
+        return { status: 'UP', details: { connection: 'ok' } };
+      } catch (error) {
+        return { 
+          status: 'DOWN', 
+          details: { error: error.message } 
+        };
+      }
+    }
+  }
+]
+```
+
+### 3. Timeout Management
+
+```typescript
+// Set appropriate timeouts for health checks
+const actuator = new LightweightActuator({
+  healthOptions: {
+    healthCheckTimeout: 3000, // 3 seconds
+    // ... other options
+  }
+});
+```
+
+### 4. Metric Naming
+
+```typescript
+// Use consistent metric naming conventions
+customMetrics: [
+  {
+    name: 'app_http_requests_total',     // Use underscores, not hyphens
+    help: 'Total number of HTTP requests',
+    type: 'counter'
+  },
+  {
+    name: 'app_http_request_duration_seconds', // Include units
+    help: 'HTTP request duration in seconds',
+    type: 'histogram'
+  }
+]
+```
+
+### 5. Security Considerations
+
+```typescript
+// In production, consider authentication for actuator endpoints
+app.get('/actuator/*', (req, res, next) => {
+  const apiKey = req.headers['x-api-key'];
+  if (apiKey !== process.env.ACTUATOR_API_KEY) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+});
+```
+
+### 6. Performance Optimization
+
+```typescript
+// Cache expensive health checks
+let cachedHealthCheck: any = null;
+let lastCheck = 0;
+const CACHE_DURATION = 30000; // 30 seconds
+
+customHealthChecks: [
+  {
+    name: 'expensive-service',
+    check: async () => {
+      const now = Date.now();
+      if (cachedHealthCheck && (now - lastCheck) < CACHE_DURATION) {
+        return cachedHealthCheck;
+      }
+      
+      // Expensive health check logic
+      const result = await expensiveHealthCheck();
+      cachedHealthCheck = result;
+      lastCheck = now;
+      return result;
+    }
+  }
+]
+```
+
+### 7. Monitoring Integration
+
+```typescript
+// Integrate with monitoring systems
+const actuator = new LightweightActuator({
+  customMetrics: [
+    {
+      name: 'app_business_metric',
+      help: 'Key business metric',
+      type: 'gauge'
+    }
+  ]
+});
+
+// Update business metrics
+const businessMetric = actuator.getCustomMetric('app_business_metric');
+setInterval(() => {
+  const value = calculateBusinessMetric();
+  businessMetric.set(value);
+}, 60000); // Update every minute
+```
+
+This comprehensive usage guide covers all aspects of Node Actuator Lite, from basic setup to advanced integration patterns and best practices.
