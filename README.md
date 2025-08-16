@@ -215,15 +215,23 @@ const actuator = new LightweightActuator({
 
 These are placeholders for future implementation. Use only the methods listed in the "Serverless Mode Methods" section above.
 
-### Vercel Integration Example
+## 🚀 Vercel Integration
 
-```typescript
-// api/actuator/[...path].ts
+### Step-by-Step Setup
+
+**1. Install the package:**
+```bash
+npm install node-actuator-lite
+```
+
+**2. Create the API route file:**
+Create `api/actuator/[...path].js` in your Vercel project:
+
+```javascript
 import { LightweightActuator } from 'node-actuator-lite';
-import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const actuator = new LightweightActuator({
-  serverless: true,
+  serverless: true, // ⚠️ CRITICAL: Enable serverless mode
   enableHealth: true,
   enableMetrics: true,
   enablePrometheus: true,
@@ -233,61 +241,91 @@ const actuator = new LightweightActuator({
   enableHeapDump: true,
   customHealthChecks: [
     {
-      name: 'database',
+      name: 'database', // ✅ Use named health checks
       check: async () => {
-        // Your database health check logic
-        return { status: 'UP', details: { connection: 'ok' } };
+        // Your database health check
+        return { status: 'UP', details: { /* your details */ } };
       }
     }
+  ],
+  customMetrics: [
+    { name: 'app_requests_total', help: 'Total requests', type: 'counter' }
   ]
 });
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const { path } = req.query;
-  const pathString = Array.isArray(path) ? path.join('/') : path || '';
+export default async function handler(req, res) {
+  // CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
   try {
+    await actuator.start();
+    
+    // ⚠️ CRITICAL: Vercel uses '...path' not 'path'
+    const path = req.query['...path'];
+    const pathString = Array.isArray(path) ? path.join('/') : path || '';
+    
     switch (pathString) {
       case 'health':
         const health = await actuator.getHealth();
-        res.json(health);
-        break;
+        return res.status(200).json(health);
       case 'metrics':
         const metrics = await actuator.getMetrics();
-        res.json(metrics);
-        break;
+        return res.status(200).json(metrics);
       case 'prometheus':
         const prometheus = await actuator.getPrometheusMetrics();
         res.setHeader('Content-Type', 'text/plain');
-        res.send(prometheus);
-        break;
+        return res.status(200).send(prometheus);
       case 'info':
         const info = await actuator.getInfo();
-        res.json(info);
-        break;
+        return res.status(200).json(info);
       case 'env':
         const env = await actuator.getEnvironment();
-        res.json(env);
-        break;
+        return res.status(200).json(env);
       case 'threaddump':
         const threadDump = actuator.getThreadDump();
-        res.json(threadDump);
-        break;
+        return res.status(200).json(threadDump);
       case 'heapdump':
-        const heapDump = await actuator.getHeapDump();
-        res.json(heapDump);
-        break;
+        if (req.method === 'POST') {
+          const heapDump = await actuator.getHeapDump();
+          return res.status(200).json(heapDump);
+        }
+        return res.status(405).json({ error: 'Method not allowed' });
       default:
-        res.status(404).json({ 
-          error: 'Endpoint not found',
-          availableEndpoints: ['health', 'metrics', 'prometheus', 'info', 'env', 'threaddump', 'heapdump']
-        });
+        return res.status(404).json({ error: 'Endpoint not found' });
     }
   } catch (error) {
-    res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ error: error.message });
   }
 }
 ```
+
+### Key Points for Vercel
+
+✅ **Use `serverless: true`** - This prevents the library from starting its own HTTP server  
+✅ **Use `req.query['...path']`** - Vercel passes dynamic routes as `...path`, not `path`  
+✅ **Use named health checks** - Instead of generic "custom-0", use descriptive names  
+✅ **Handle CORS** - Add proper CORS headers for web access  
+✅ **Use direct methods** - `getHealth()`, `getMetrics()`, etc. (available in v1.2.0+)  
+
+### Available Endpoints
+
+- `GET /api/actuator/health` - Application health status
+- `GET /api/actuator/metrics` - Application metrics (JSON)
+- `GET /api/actuator/prometheus` - Prometheus metrics format
+- `GET /api/actuator/info` - Application information
+- `GET /api/actuator/env` - Environment variables
+- `GET /api/actuator/threaddump` - Thread dump information
+- `POST /api/actuator/heapdump` - Generate heap dump
+
+### Common Issues
+
+- **404 errors**: Make sure you're using `req.query['...path']` not `req.query.path`
+- **Serverless errors**: Ensure `serverless: true` is set
+- **Method errors**: Heapdump requires POST method
 
 ### AWS Lambda Integration Example
 
