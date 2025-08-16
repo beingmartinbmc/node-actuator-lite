@@ -2,17 +2,13 @@
 
 This example demonstrates how to use `node-actuator-lite` with Vercel's serverless architecture using individual API routes.
 
-## Problem
+## Overview
 
-The original `Actuator` class creates its own Express server and runs on a separate port, which doesn't work well with Vercel's serverless architecture because:
+Node Actuator Lite is designed to be **serverless-first** and **framework-agnostic**. For Vercel's serverless architecture, you create individual API routes that use the direct data access methods.
 
-- Vercel expects individual serverless functions in the `api/` directory
-- Each function should handle its own routes
-- The actuator library wants to run as a standalone server
+## Why Individual Routes?
 
-## Solution
-
-For Vercel serverless functions, you need to create **individual API routes** for each actuator endpoint. The `ActuatorMiddleware` is designed for Express applications, but for Vercel, you should use the individual collectors directly.
+Vercel expects individual serverless functions in the `api/` directory, and Node Actuator Lite provides direct data access methods that work perfectly with this architecture.
 
 ## Correct Implementation for Vercel
 
@@ -104,7 +100,7 @@ api/
 | Approach | Use Case | Implementation |
 |----------|----------|----------------|
 | **Individual API Routes** | Vercel Serverless | Separate files for each endpoint |
-| **ActuatorMiddleware** | Express Applications | Single middleware with router |
+| **Standalone HTTP Server** | Traditional Apps | Single server with all endpoints |
 
 ## Configuration Options
 
@@ -170,11 +166,11 @@ const healthChecker = new HealthChecker([
 - **Same Functionality**: All actuator features are available
 - **Type Safe**: Full TypeScript support
 
-## Migration from Express
+## Migration from Traditional Applications
 
-If you're migrating from an Express application:
+If you're migrating from a traditional Node.js application:
 
-1. **Replace ActuatorMiddleware** with individual API routes
+1. **Replace standalone server** with individual API routes
 2. **Use individual collectors** (HealthChecker, MetricsCollector, etc.)
 3. **Configure each endpoint** independently
 4. **Add Vercel-specific metadata** to responses

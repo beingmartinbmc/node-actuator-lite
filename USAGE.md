@@ -531,65 +531,35 @@ app_error_rate 2.5
 
 ## Integration Examples
 
-### Express.js Integration
+### Framework-Agnostic Approach
+
+Node Actuator Lite is designed to be **framework-agnostic** and **serverless-first**. Instead of providing framework-specific middleware, it offers direct data access methods that work with any Node.js environment.
+
+### Standalone HTTP Server
+
+For traditional applications that can start their own HTTP server:
 
 ```typescript
-import express from 'express';
 import { LightweightActuator } from 'node-actuator-lite';
 
-const app = express();
-const port = 3000;
-
-// Create actuator for direct data access
 const actuator = new LightweightActuator({
-  serverless: true,
+  port: 3001,
+  serverless: false,
   enableHealth: true,
   enableMetrics: true,
   enablePrometheus: true
 });
 
-// Add actuator endpoints to Express
-app.get('/actuator/health', async (req, res) => {
-  try {
-    const health = await actuator.getHealth();
-    res.json(health);
-  } catch (error) {
-    res.status(500).json({ error: 'Health check failed' });
-  }
-});
-
-app.get('/actuator/metrics', async (req, res) => {
-  try {
-    const metrics = await actuator.getMetrics();
-    res.json(metrics);
-  } catch (error) {
-    res.status(500).json({ error: 'Metrics collection failed' });
-  }
-});
-
-app.get('/actuator/prometheus', async (req, res) => {
-  try {
-    const prometheus = await actuator.getPrometheusMetrics();
-    res.setHeader('Content-Type', 'text/plain');
-    res.send(prometheus);
-  } catch (error) {
-    res.status(500).json({ error: 'Prometheus metrics failed' });
-  }
-});
-
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
+await actuator.start();
+console.log(`Actuator running on port ${actuator.getPort()}`);
 ```
 
-### Fastify Integration
+### Serverless Integration (Recommended)
+
+For serverless platforms like Vercel, AWS Lambda, or Netlify:
 
 ```typescript
-import Fastify from 'fastify';
 import { LightweightActuator } from 'node-actuator-lite';
-
-const fastify = Fastify();
-const port = 3000;
 
 const actuator = new LightweightActuator({
   serverless: true,
@@ -598,73 +568,28 @@ const actuator = new LightweightActuator({
   enablePrometheus: true
 });
 
-// Add actuator routes
-fastify.get('/actuator/health', async (request, reply) => {
-  try {
-    const health = await actuator.getHealth();
-    return health;
-  } catch (error) {
-    reply.status(500).send({ error: 'Health check failed' });
-  }
-});
+// Initialize (no HTTP server started)
+await actuator.start();
 
-fastify.get('/actuator/prometheus', async (request, reply) => {
-  try {
-    const prometheus = await actuator.getPrometheusMetrics();
-    reply.header('Content-Type', 'text/plain');
-    return prometheus;
-  } catch (error) {
-    reply.status(500).send({ error: 'Prometheus metrics failed' });
-  }
-});
-
-fastify.listen({ port }, (err) => {
-  if (err) throw err;
-  console.log(`Server running on port ${port}`);
-});
+// Use direct data access methods
+const health = await actuator.getHealth();
+const metrics = await actuator.getMetrics();
+const prometheus = await actuator.getPrometheusMetrics();
 ```
 
-### Koa Integration
+### Custom Framework Integration
+
+If you need to integrate with a specific framework, use the direct data access methods:
 
 ```typescript
-import Koa from 'koa';
-import Router from '@koa/router';
-import { LightweightActuator } from 'node-actuator-lite';
-
-const app = new Koa();
-const router = new Router();
-
-const actuator = new LightweightActuator({
-  serverless: true,
-  enableHealth: true,
-  enableMetrics: true,
-  enablePrometheus: true
-});
-
-// Add actuator routes
-router.get('/actuator/health', async (ctx) => {
-  try {
-    const health = await actuator.getHealth();
-    ctx.body = health;
-  } catch (error) {
-    ctx.status = 500;
-    ctx.body = { error: 'Health check failed' };
-  }
-});
-
-router.get('/actuator/prometheus', async (ctx) => {
-  try {
-    const prometheus = await actuator.getPrometheusMetrics();
-    ctx.set('Content-Type', 'text/plain');
-    ctx.body = prometheus;
-  } catch (error) {
-    ctx.status = 500;
-    ctx.body = { error: 'Prometheus metrics failed' };
-  }
-});
-
-app.use(router.routes());
-app.listen(3000);
+// Example: Any framework can use these methods
+const health = await actuator.getHealth();
+const metrics = await actuator.getMetrics();
+const prometheus = await actuator.getPrometheusMetrics();
+const info = await actuator.getInfo();
+const env = await actuator.getEnvironment();
+const threadDump = actuator.getThreadDump();
+const heapDump = await actuator.getHeapDump();
 ```
 
 ## Best Practices
