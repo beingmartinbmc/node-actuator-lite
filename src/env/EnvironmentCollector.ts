@@ -19,7 +19,41 @@ export interface EnvironmentData {
   };
 }
 
+export interface EnvironmentCollectorOptions {
+  maskPatterns?: string[];           // Patterns to match for masking (e.g., ['PASSWORD', 'SECRET'])
+  maskCustomVariables?: string[];    // Specific variable names to mask
+  maskValue?: string;                // Value to show instead of actual value (default: '[HIDDEN]')
+  showMaskedCount?: boolean;         // Show count of masked variables
+}
+
 export class EnvironmentCollector {
+  private options: EnvironmentCollectorOptions;
+
+  constructor(options: EnvironmentCollectorOptions = {}) {
+    this.options = {
+      maskPatterns: [
+        'PASSWORD',
+        'SECRET',
+        'KEY',
+        'TOKEN',
+        'AUTH',
+        'CREDENTIAL',
+        'PRIVATE',
+        'SIGNATURE',
+        'API_KEY',
+        'DATABASE_URL',
+        'REDIS_URL',
+        'MONGODB_URI',
+        'JWT_SECRET',
+        'SESSION_SECRET'
+      ],
+      maskCustomVariables: [],
+      maskValue: '[HIDDEN]',
+      showMaskedCount: true,
+      ...options
+    };
+  }
+
   public async collect(): Promise<EnvironmentData> {
     const systemInfo = this.collectSystemInfo();
     const processEnv = this.collectProcessEnv();
@@ -50,30 +84,45 @@ export class EnvironmentCollector {
 
   private collectProcessEnv(): Record<string, string> {
     const env: Record<string, string> = {};
+    let maskedCount = 0;
     
-    // Filter out sensitive environment variables
-    const sensitiveKeys = [
-      'PASSWORD',
-      'SECRET',
-      'KEY',
-      'TOKEN',
-      'AUTH',
-      'CREDENTIAL',
-      'PRIVATE',
-      'SIGNATURE'
-    ];
-
     for (const [key, value] of Object.entries(process.env)) {
       if (value !== undefined) {
-        const isSensitive = sensitiveKeys.some(sensitiveKey => 
-          key.toUpperCase().includes(sensitiveKey)
-        );
+        const shouldMask = this.shouldMaskVariable(key);
         
-        env[key] = isSensitive ? '[HIDDEN]' : value;
+        if (shouldMask) {
+          env[key] = this.options.maskValue!;
+          maskedCount++;
+        } else {
+          env[key] = value;
+        }
+      }
+    }
+
+    // Add masked count information if enabled
+    if (this.options.showMaskedCount) {
+      env['_MASKED_VARIABLES_COUNT'] = maskedCount.toString();
+      env['_MASKED_PATTERNS'] = this.options.maskPatterns!.join(', ');
+      if (this.options.maskCustomVariables!.length > 0) {
+        env['_MASKED_CUSTOM_VARIABLES'] = this.options.maskCustomVariables!.join(', ');
       }
     }
 
     return env;
+  }
+
+  private shouldMaskVariable(key: string): boolean {
+    const upperKey = key.toUpperCase();
+    
+    // Check custom variables first
+    if (this.options.maskCustomVariables!.includes(key)) {
+      return true;
+    }
+    
+    // Check patterns
+    return this.options.maskPatterns!.some(pattern => 
+      upperKey.includes(pattern.toUpperCase())
+    );
   }
 
   public async getFormattedEnvironment(): Promise<Record<string, any>> {
@@ -116,5 +165,42 @@ export class EnvironmentCollector {
     }
     
     return env;
+  }
+
+  // Utility methods for environment variable management
+  public addMaskPattern(pattern: string): void {
+    if (!this.options.maskPatterns!.includes(pattern)) {
+      this.options.maskPatterns!.push(pattern);
+    }
+  }
+
+  public addCustomMaskVariable(variable: string): void {
+    if (!this.options.maskCustomVariables!.includes(variable)) {
+      this.options.maskCustomVariables!.push(variable);
+    }
+  }
+
+  public removeMaskPattern(pattern: string): void {
+    this.options.maskPatterns = this.options.maskPatterns!.filter(p => p !== pattern);
+  }
+
+  public removeCustomMaskVariable(variable: string): void {
+    this.options.maskCustomVariables = this.options.maskCustomVariables!.filter(v => v !== variable);
+  }
+
+  public getMaskPatterns(): string[] {
+    return [...this.options.maskPatterns!];
+  }
+
+  public getCustomMaskVariables(): string[] {
+    return [...this.options.maskCustomVariables!];
+  }
+
+  public setMaskValue(value: string): void {
+    this.options.maskValue = value;
+  }
+
+  public getMaskValue(): string {
+    return this.options.maskValue!;
   }
 } 

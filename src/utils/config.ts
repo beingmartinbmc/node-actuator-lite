@@ -43,6 +43,12 @@ export interface ValidatedActuatorOptions {
     retryDelay?: number; // Base delay between retries in milliseconds (default: 100)
     exponentialBackoff?: boolean; // Whether to use exponential backoff (default: true)
   };
+  envOptions?: {
+    maskPatterns?: string[];
+    maskCustomVariables?: string[];
+    maskValue?: string;
+    showMaskedCount?: boolean;
+  };
 }
 
 export function validateConfig(options: any): ValidatedActuatorOptions {
@@ -140,6 +146,29 @@ export function validateConfig(options: any): ValidatedActuatorOptions {
       
       if (options.retryOptions.exponentialBackoff !== undefined && typeof options.retryOptions.exponentialBackoff !== 'boolean') {
         errors.push('exponentialBackoff must be a boolean');
+      }
+    }
+  }
+
+  // Validate env options
+  if (options.envOptions !== undefined) {
+    if (typeof options.envOptions !== 'object') {
+      errors.push('envOptions must be an object');
+    } else {
+      if (options.envOptions.maskPatterns !== undefined && !Array.isArray(options.envOptions.maskPatterns)) {
+        errors.push('envOptions.maskPatterns must be an array');
+      }
+      
+      if (options.envOptions.maskCustomVariables !== undefined && !Array.isArray(options.envOptions.maskCustomVariables)) {
+        errors.push('envOptions.maskCustomVariables must be an array');
+      }
+      
+      if (options.envOptions.maskValue !== undefined && typeof options.envOptions.maskValue !== 'string') {
+        errors.push('envOptions.maskValue must be a string');
+      }
+      
+      if (options.envOptions.showMaskedCount !== undefined && typeof options.envOptions.showMaskedCount !== 'boolean') {
+        errors.push('envOptions.showMaskedCount must be a boolean');
       }
     }
   }

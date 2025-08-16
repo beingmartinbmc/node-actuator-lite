@@ -53,6 +53,12 @@ export interface LightweightActuatorOptions {
     retryDelay?: number;
     exponentialBackoff?: boolean;
   };
+  envOptions?: {
+    maskPatterns?: string[];
+    maskCustomVariables?: string[];
+    maskValue?: string;
+    showMaskedCount?: boolean;
+  };
 }
 
 export class LightweightActuator {
@@ -121,7 +127,7 @@ export class LightweightActuator {
     );
     this.metricsCollector = new MetricsCollector();
     this.infoCollector = new InfoCollector();
-    this.envCollector = new EnvironmentCollector();
+    this.envCollector = new EnvironmentCollector(this.options.envOptions);
 
     // Initialize Prometheus metrics
     if (this.options.enablePrometheus) {

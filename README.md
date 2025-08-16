@@ -150,6 +150,12 @@ interface LightweightActuatorOptions {
     retryDelay?: number;            // Base delay between retries (default: 100ms)
     exponentialBackoff?: boolean;   // Use exponential backoff (default: true)
   };
+  envOptions?: {                    // Environment variable masking configuration
+    maskPatterns?: string[];        // Patterns to match for masking (e.g., ['PASSWORD', 'SECRET'])
+    maskCustomVariables?: string[]; // Specific variable names to mask
+    maskValue?: string;             // Value to show instead of actual value (default: '[HIDDEN]')
+    showMaskedCount?: boolean;      // Show count of masked variables (default: true)
+  };
 }
 ```
 
@@ -466,6 +472,74 @@ Generates comprehensive memory analysis:
 - Loaded modules
 - System information
 - File-based output for analysis
+
+## 🔒 Environment Variable Masking
+
+Protect sensitive environment variables from being exposed in the `/env` endpoint:
+
+### Default Masking
+
+By default, the following patterns are automatically masked:
+- `PASSWORD`, `SECRET`, `KEY`, `TOKEN`, `AUTH`, `CREDENTIAL`, `PRIVATE`, `SIGNATURE`
+- `API_KEY`, `DATABASE_URL`, `REDIS_URL`, `MONGODB_URI`, `JWT_SECRET`, `SESSION_SECRET`
+
+### Custom Configuration
+
+```typescript
+const actuator = new LightweightActuator({
+  envOptions: {
+    // Custom patterns to match
+    maskPatterns: ['CUSTOM', 'SPECIAL', 'SENSITIVE'],
+    
+    // Specific variables to mask
+    maskCustomVariables: ['MY_SPECIFIC_VAR', 'ANOTHER_SECRET'],
+    
+    // Custom mask value
+    maskValue: '🔒 HIDDEN 🔒',
+    
+    // Show masking statistics
+    showMaskedCount: true
+  }
+});
+```
+
+### Examples
+
+```typescript
+// Basic masking
+process.env['DATABASE_PASSWORD'] = 'secret123';
+process.env['API_KEY'] = 'sk-123456789';
+
+// Result: Both will show as '[HIDDEN]'
+
+// Custom masking
+const actuator = new LightweightActuator({
+  envOptions: {
+    maskCustomVariables: ['MY_SPECIAL_VAR'],
+    maskValue: '***SECRET***'
+  }
+});
+
+process.env['MY_SPECIAL_VAR'] = 'sensitive-data';
+// Result: Will show as '***SECRET***'
+```
+
+### Utility Methods
+
+```typescript
+// Add patterns dynamically
+actuator.envCollector.addMaskPattern('NEW_PATTERN');
+
+// Add specific variables
+actuator.envCollector.addCustomMaskVariable('SPECIFIC_VAR');
+
+// Remove patterns
+actuator.envCollector.removeMaskPattern('PASSWORD');
+
+// Get current configuration
+const patterns = actuator.envCollector.getMaskPatterns();
+const customVars = actuator.envCollector.getCustomMaskVariables();
+```
 
 ## 🚨 Troubleshooting
 
