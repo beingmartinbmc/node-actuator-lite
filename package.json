@@ -37,7 +37,8 @@
   },
   "homepage": "https://github.com/beingmartinbmc/node-actuator-lite#readme",
   "files": [
-    "dist/**/*",
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
     "README.md",
     "LICENSE"
   ],
