@@ -57,10 +57,10 @@ export class CircuitBreaker {
 
     if (this.failureCount >= this.options.failureThreshold) {
       this.state = CircuitBreakerState.OPEN;
-      logger.warn({ 
-        failureCount: this.failureCount, 
-        threshold: this.options.failureThreshold 
-      }, 'Circuit breaker opened due to failure threshold exceeded');
+            logger.warn('Circuit breaker opened due to failure threshold exceeded', {
+        failureCount: this.failureCount,
+        threshold: this.options.failureThreshold
+      });
     }
   }
 

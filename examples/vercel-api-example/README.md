@@ -1,6 +1,6 @@
 # Vercel Integration Example
 
-This example demonstrates how to use `node-actuator-lite` with Vercel's serverless architecture using the new `ActuatorMiddleware`.
+This example demonstrates how to use `node-actuator-lite` with Vercel's serverless architecture using individual API routes.
 
 ## Problem
 
@@ -12,211 +12,177 @@ The original `Actuator` class creates its own Express server and runs on a separ
 
 ## Solution
 
-The new `ActuatorMiddleware` class provides the same functionality as `Actuator` but integrates with existing Express applications, similar to how Spring Boot Actuator works. **It's designed to be serverless-friendly with all configuration done upfront in the constructor.**
+For Vercel serverless functions, you need to create **individual API routes** for each actuator endpoint. The `ActuatorMiddleware` is designed for Express applications, but for Vercel, you should use the individual collectors directly.
 
-## Key Differences
+## Correct Implementation for Vercel
 
-| Feature | Standalone (`Actuator`) | Integration (`ActuatorMiddleware`) |
-|---------|------------------------|-----------------------------------|
-| Server | Creates own Express server | Uses existing Express app |
-| Port | Separate port | Same port as main app |
-| Deployment | Traditional servers, Docker, K8s | Serverless, Vercel, Express apps |
-| Usage | `actuator.start()` | `app.use(actuatorMiddleware.getRouter())` |
-| Configuration | Runtime API calls | All upfront in constructor |
-| API Design | Instance methods | Constructor-only configuration |
+### 1. Individual API Routes (Recommended for Vercel)
 
-## Usage Examples
-
-### 1. Express Application Integration (Serverless-Friendly)
+Create separate files for each actuator endpoint:
 
 ```typescript
-import express from 'express';
-import { ActuatorMiddleware } from 'node-actuator-lite';
-
-const app = express();
-
-// Configure everything upfront - no runtime API calls needed!
-const actuatorMiddleware = new ActuatorMiddleware({
-  basePath: '/actuator',
-  enableHealth: true,
-  enableMetrics: true,
-  // Serverless-friendly health checks configuration
-  healthChecks: [
-    {
-      name: 'database',
-      check: async () => ({ status: 'UP', details: { connected: true } }),
-      enabled: true,
-      critical: true
-    },
-    {
-      name: 'email-service',
-      check: async () => ({ status: 'UP', details: { sent: 10, failed: 1 } }),
-      enabled: true,
-      critical: false
-    }
-  ],
-  // Serverless-friendly metrics configuration
-  customMetrics: [
-    { 
-      name: 'api_requests_total', 
-      help: 'Total number of API requests', 
-      type: 'counter',
-      labelNames: ['method', 'endpoint']
-    }
-  ],
-  // Serverless-friendly route registration
-  routes: [
-    { method: 'GET', path: '/api/users', handler: 'Get Users Handler' },
-    { method: 'POST', path: '/api/users', handler: 'Create User Handler' }
-  ]
-});
-
-// Add actuator routes to your Express app
-app.use(actuatorMiddleware.getRouter());
-
-// Your business logic routes
-app.get('/api/users', (req, res) => {
-  res.json({ users: [] });
-});
-
-app.listen(3000, () => {
-  console.log('App running on port 3000');
-  console.log('Actuator available at /actuator');
-});
-```
-
-### 2. Vercel Serverless Functions
-
-Create a catch-all API route at `api/actuator/[...path].ts`:
-
-```typescript
+// api/actuator-serverless/health.ts
 import { NextApiRequest, NextApiResponse } from 'next';
-import { ActuatorMiddleware } from 'node-actuator-lite';
+import { HealthChecker } from 'node-actuator-lite';
 
-// Configure everything upfront for serverless
-const actuatorMiddleware = new ActuatorMiddleware({
-  basePath: '/api/actuator',
-  enableHealth: true,
-  enableMetrics: true,
-  enableHeapDump: false, // Disable in serverless
-  healthChecks: [
-    {
-      name: 'database',
-      check: async () => ({ status: 'UP', details: { connected: true } }),
-      enabled: true,
-      critical: true
-    }
-  ],
-  healthOptions: {
-    includeDiskSpace: false, // Disable in serverless
+const healthChecker = new HealthChecker([
+  {
+    name: 'database',
+    check: async () => ({ status: 'UP', details: { connected: true } }),
+    enabled: true,
+    critical: true
   }
+], {
+  includeDiskSpace: false, // Disable in serverless
+  includeProcess: true
 });
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const { path } = req.query;
-  const pathString = Array.isArray(path) ? path.join('/') : path || '';
-  
-  // Route to appropriate actuator endpoint
-  switch (pathString) {
-    case 'health':
-      // Handle health check
-      break;
-    case 'metrics':
-      // Handle metrics
-      break;
-    // ... other endpoints
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const health = await healthChecker.check();
+    res.status(200).json(health);
+  } catch (error) {
+    res.status(500).json({ error: 'Health check failed' });
   }
 }
 ```
 
-## Configuration Options
-
-The `ActuatorMiddlewareOptions` interface is designed for serverless use:
-
 ```typescript
-interface ActuatorMiddlewareOptions {
-  basePath?: string;
-  enableHealth?: boolean;
-  enableMetrics?: boolean;
-  // ... other enable flags
-  
-  // Serverless-friendly configuration - everything configured upfront
-  healthChecks?: Array<{
-    name: string;
-    check: () => Promise<{ status: string; details?: any }>;
-    enabled?: boolean;
-    critical?: boolean;
-  }>;
-  customMetrics?: Array<{
-    name: string;
-    help: string;
-    type: 'counter' | 'gauge' | 'histogram';
-    labelNames?: string[];
-  }>;
-  customBeans?: Record<string, any>;
-  customConfigProps?: Record<string, any>;
-  routes?: Array<{ method: string; path: string; handler: string }>;
+// api/actuator-serverless/metrics.ts
+import { NextApiRequest, NextApiResponse } from 'next';
+import { MetricsCollector } from 'node-actuator-lite';
+
+const metricsCollector = new MetricsCollector();
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const metrics = await metricsCollector.collect();
+    res.status(200).json(metrics);
+  } catch (error) {
+    res.status(500).json({ error: 'Metrics collection failed' });
+  }
 }
 ```
 
-### Serverless-Specific Recommendations
+### 2. Available Endpoints
 
-1. **Disable Heap Dumps**: Set `enableHeapDump: false` (not relevant in serverless)
-2. **Disable Disk Space Checks**: Set `healthOptions.includeDiskSpace: false`
-3. **Configure Everything Upfront**: Use constructor options instead of runtime API calls
-4. **Use Environment Variables**: Configure endpoints using environment variables for different deployment stages
-5. **Keep Health Checks Lightweight**: Avoid cold start penalties
+When deployed to Vercel, these endpoints will be available at:
 
-## Available Endpoints
+- `GET /api/actuator-serverless` - Root endpoint with available links
+- `GET /api/actuator-serverless/health` - Health check
+- `GET /api/actuator-serverless/metrics` - Application metrics
+- `GET /api/actuator-serverless/info` - Application info
+- `GET /api/actuator-serverless/env` - Environment variables
 
-When using the middleware, all actuator endpoints are available under your configured `basePath`:
+### 3. File Structure
 
-- `GET /actuator/health` - Health check
-- `GET /actuator/metrics` - Application metrics
-- `GET /actuator/prometheus` - Prometheus metrics
-- `GET /actuator/info` - Application info
-- `GET /actuator/env` - Environment variables
-- `GET /actuator/threaddump` - Thread dump
-- `GET /actuator/mappings` - Route mappings
-- `GET /actuator/beans` - Application beans
-- `GET /actuator/configprops` - Configuration properties
+```
+api/
+├── actuator-serverless/
+│   ├── index.ts          # Root endpoint
+│   ├── health.ts         # Health check
+│   ├── metrics.ts        # Metrics
+│   ├── info.ts           # Application info
+│   ├── env.ts            # Environment variables
+│   ├── prometheus.ts     # Prometheus metrics
+│   ├── threaddump.ts     # Thread dump
+│   ├── mappings.ts       # Route mappings
+│   ├── beans.ts          # Application beans
+│   └── configprops.ts    # Configuration properties
+```
 
-## Migration from Actuator to ActuatorMiddleware
+## Key Differences
 
-If you're migrating from the standalone `Actuator` to `ActuatorMiddleware`:
+| Approach | Use Case | Implementation |
+|----------|----------|----------------|
+| **Individual API Routes** | Vercel Serverless | Separate files for each endpoint |
+| **ActuatorMiddleware** | Express Applications | Single middleware with router |
 
-1. Replace `Actuator` import with `ActuatorMiddleware`
-2. Remove the `port` option from configuration
-3. Replace runtime API calls with constructor configuration:
-   ```typescript
-   // Old way (runtime API calls)
-   const actuator = new Actuator(options);
-   actuator.addHealthIndicator('db', dbCheck);
-   actuator.addCustomMetric('requests', 'help', 'counter');
-   await actuator.start();
-   
-   // New way (constructor configuration)
-   const actuatorMiddleware = new ActuatorMiddleware({
-     ...options,
-     healthChecks: [{ name: 'db', check: dbCheck }],
-     customMetrics: [{ name: 'requests', help: 'help', type: 'counter' }]
-   });
-   app.use(actuatorMiddleware.getRouter());
-   ```
-4. Remove any port-specific logic
+## Configuration Options
+
+Each endpoint can be configured independently:
+
+```typescript
+// Health endpoint configuration
+const healthChecker = new HealthChecker([
+  {
+    name: 'database',
+    check: async () => await databaseService.healthCheck(),
+    enabled: true,
+    critical: true
+  },
+  {
+    name: 'email-service',
+    check: async () => await emailService.healthCheck(),
+    enabled: true,
+    critical: false
+  }
+], {
+  includeDiskSpace: false, // Disable in serverless
+  includeProcess: true,
+  healthCheckTimeout: 5000
+});
+```
+
+## Serverless-Specific Recommendations
+
+1. **Disable Disk Space Checks**: Set `includeDiskSpace: false` in health options
+2. **Keep Health Checks Lightweight**: Avoid cold start penalties
+3. **Use Environment Variables**: Configure endpoints using Vercel environment variables
+4. **Handle Errors Gracefully**: Always wrap in try-catch blocks
+5. **Add Vercel Metadata**: Include region, environment, and function name in responses
+
+## Example Response
+
+```json
+{
+  "status": "UP",
+  "details": {
+    "checks": [
+      {
+        "name": "database",
+        "status": "UP",
+        "details": { "connected": true, "responseTime": 45 }
+      }
+    ]
+  },
+  "timestamp": "2024-01-01T00:00:00.000Z",
+  "uptime": 123.456,
+  "deployment": "vercel-serverless",
+  "function": "actuator-serverless-health"
+}
+```
 
 ## Benefits
 
-- **Vercel Compatible**: Works seamlessly with Vercel's serverless architecture
-- **Spring Boot Similar**: Follows the same pattern as Spring Boot Actuator
-- **Serverless Optimized**: All configuration done upfront, no runtime API calls
+- **Vercel Native**: Works seamlessly with Vercel's serverless architecture
+- **Individual Functions**: Each endpoint is a separate serverless function
+- **Cold Start Optimized**: Lightweight and fast startup
+- **Scalable**: Each endpoint scales independently
 - **Same Functionality**: All actuator features are available
-- **Flexible**: Can be used with any Express-based application
-- **Lightweight**: No additional server overhead
-- **Stateless**: Perfect for serverless environments
+- **Type Safe**: Full TypeScript support
+
+## Migration from Express
+
+If you're migrating from an Express application:
+
+1. **Replace ActuatorMiddleware** with individual API routes
+2. **Use individual collectors** (HealthChecker, MetricsCollector, etc.)
+3. **Configure each endpoint** independently
+4. **Add Vercel-specific metadata** to responses
 
 ## Example Files
 
-- `vercel-integration-demo.ts` - Complete Express application example
-- `api/actuator/[...path].ts` - Vercel serverless function example
-- `api/health.ts` - Simple health check endpoint example 
+- `api/actuator-serverless/index.ts` - Root endpoint with available links
+- `api/actuator-serverless/health.ts` - Health check endpoint
+- `api/actuator-serverless/metrics.ts` - Metrics endpoint
+- `api/actuator-serverless/info.ts` - Info endpoint
+- `api/actuator-serverless/env.ts` - Environment endpoint 

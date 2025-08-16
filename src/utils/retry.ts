@@ -36,11 +36,11 @@ export class Retry {
           throw lastError;
         }
 
-        logger.warn({ 
-          attempt, 
-          maxAttempts: this.options.maxAttempts, 
-          error: lastError.message 
-        }, `Operation failed, retrying in ${currentDelay}ms`);
+                logger.warn(`Operation failed, retrying in ${currentDelay}ms`, {
+          attempt,
+          maxAttempts: this.options.maxAttempts,
+          error: lastError.message
+        });
 
         // Wait before retry
         await this.sleep(currentDelay);

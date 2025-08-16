@@ -150,11 +150,11 @@ export class ThreadDumpCollector {
       
       const collectionTime = performance.now() - startTime;
       
-      logger.debug({ 
+            logger.debug('Thread dump collected successfully', {
         collectionTime: `${collectionTime.toFixed(2)}ms`,
         totalThreads: summary.totalThreads,
-        activeRequests: summary.activeRequests 
-      }, 'Thread dump collected successfully');
+        activeRequests: summary.activeRequests
+      });
 
       return {
         timestamp: new Date().toISOString(),
@@ -165,13 +165,19 @@ export class ThreadDumpCollector {
         summary
       };
     } catch (error) {
-      logger.error({ error: error instanceof Error ? error.message : 'Unknown error' }, 'Failed to collect thread dump');
+      logger.error('Failed to collect thread dump', { error: error instanceof Error ? error.message : 'Unknown error' });
       throw error;
     }
   }
 
   private collectMainThreadInfo(): ThreadInfo {
-    const cpuUsage = process.cpuUsage();
+    let cpuUsage = { user: 0, system: 0 };
+    
+    try {
+      cpuUsage = process.cpuUsage();
+    } catch (error) {
+      logger.warn('Failed to get CPU usage', error);
+    }
     
     // Get detailed stack trace
     const stackTrace = this.getDetailedStackTrace();

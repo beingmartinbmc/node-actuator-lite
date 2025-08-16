@@ -140,7 +140,7 @@ export function validateConfig(options: any): ValidatedActuatorOptions {
 
   if (errors.length > 0) {
     const errorMessage = `Configuration validation failed:\n${errors.join('\n')}`;
-    logger.error({ errors }, 'Configuration validation failed');
+    logger.error('Configuration validation failed', { errors });
     throw new Error(errorMessage);
   }
 

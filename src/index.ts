@@ -1,6 +1,6 @@
-// Main exports
-export { Actuator, ActuatorOptions } from './core/Actuator';
-export { ActuatorMiddleware, ActuatorMiddlewareOptions } from './core/ActuatorMiddleware';
+// Lightweight exports (Express-free)
+export { LightweightActuator, LightweightActuatorOptions } from './core/LightweightActuator';
+export { LightweightServer, Request, Response, RouteHandler } from './core/LightweightServer';
 
 // Health exports
 export { HealthChecker, HealthStatus, HealthCheck } from './health/HealthChecker';
@@ -28,6 +28,9 @@ export {
   EnvironmentCollector, 
   EnvironmentData 
 } from './env/EnvironmentCollector';
+
+// Logger exports
+export { default as logger, LOG_LEVELS, LogLevelName } from './utils/logger';
 
 // Re-export prom-client for convenience
 export * from 'prom-client'; 

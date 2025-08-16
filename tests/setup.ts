@@ -1,10 +1,7 @@
 // Test setup file
 import { performance } from 'perf_hooks';
 import { register } from 'prom-client';
-import { ErrorHandler } from '../src/utils/errorHandler';
-
-// Setup global error handlers
-ErrorHandler.setupGlobalHandlers();
+import { LightweightActuator } from '../src/core/LightweightActuator';
 
 // Mock performance.now for consistent testing
 global.performance = performance;
@@ -23,9 +20,8 @@ global.console = {
 // Clear Prometheus metrics between tests to prevent registration conflicts
 beforeEach(() => {
   register.clear();
-  // Reset the Actuator's default metrics initialization flag
-  const { Actuator } = require('../src/core/Actuator');
-  Actuator.resetDefaultMetricsFlag();
+  // Reset the LightweightActuator's default metrics initialization flag
+  LightweightActuator.resetDefaultMetricsFlag();
 });
 
 afterEach(() => {
