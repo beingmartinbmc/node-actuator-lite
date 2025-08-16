@@ -5,17 +5,28 @@ A lightweight Node.js actuator similar to Spring Boot actuator with Prometheus i
 ## 🚀 Key Features
 
 - **Minimal Dependencies**: Only essential dependencies (prom-client, uuid)
-- **Built-in HTTP Server**: Custom lightweight server using Node.js built-ins
+- **Dual Mode Support**: Standalone HTTP server and serverless mode
 - **Serverless Ready**: Optimized for Vercel, AWS Lambda, and other serverless platforms
-- **Health Monitoring**: Real-time health checks and status
-- **Metrics Collection**: System and process metrics
-- **Prometheus Integration**: Built-in Prometheus metrics
-- **Thread Dump**: Detailed Node.js event loop analysis with async operations, timers, and worker threads
-- **Heap Dump**: V8 heap snapshots and comprehensive memory analysis with file generation
+- **Health Monitoring**: Real-time health checks with named custom indicators
+- **Metrics Collection**: System and process metrics with Prometheus integration
+- **Thread Dump**: Detailed Node.js event loop analysis with async operations
+- **Heap Dump**: V8 heap snapshots and comprehensive memory analysis
 - **Lightweight**: Perfect for serverless and microservices
 - **Fast Startup**: Minimal initialization overhead
 - **Small Bundle Size**: Ideal for resource-constrained environments
 - **Framework Agnostic**: Works with any Node.js application
+
+## 📊 Mode Comparison
+
+| Feature | Standalone Mode | Serverless Mode |
+|---------|----------------|-----------------|
+| **HTTP Server** | ✅ Starts own server | ❌ No server |
+| **Port Required** | ✅ Yes | ❌ No |
+| **Data Access** | HTTP endpoints | Direct methods |
+| **Use Case** | Traditional apps | Serverless functions |
+| **Platforms** | Express, Fastify, etc. | Vercel, Lambda, Netlify |
+| **Performance** | Good | Excellent (no server overhead) |
+| **Setup** | Simple | Simple |
 
 ## 📦 Installation
 
@@ -34,13 +45,16 @@ These dependencies are essential for the core functionality and are kept to a mi
 
 ## 🎯 Quick Start
 
-### Basic Usage
+### Standalone Mode (HTTP Server)
+
+Perfect for traditional Node.js applications that can start their own HTTP server:
 
 ```typescript
 import { LightweightActuator } from 'node-actuator-lite';
 
 const actuator = new LightweightActuator({
   port: 3001,
+  serverless: false,
   enableHealth: true,
   enableMetrics: true,
   enablePrometheus: true,
@@ -49,78 +63,159 @@ const actuator = new LightweightActuator({
 });
 
 await actuator.start();
+console.log(`Actuator running on port ${actuator.getPort()}`);
 ```
 
-### Serverless Usage (Vercel, AWS Lambda)
+**Access via HTTP endpoints:**
+- `GET http://localhost:3001/actuator/health`
+- `GET http://localhost:3001/actuator/metrics`
+- `GET http://localhost:3001/actuator/prometheus`
+
+### Serverless Mode (Direct Data Access)
+
+Perfect for serverless platforms like Vercel, AWS Lambda, Netlify:
 
 ```typescript
 import { LightweightActuator } from 'node-actuator-lite';
 
-// For serverless, use dynamic port
 const actuator = new LightweightActuator({
-  port: 0,  // Dynamic port assignment
+  serverless: true,
   enableHealth: true,
   enableMetrics: true,
   enablePrometheus: true
 });
 
-// Start the actuator
+// Initialize (no HTTP server started)
 await actuator.start();
 
-// Export for serverless platforms
-export default actuator;
+// Use direct data access methods
+const health = await actuator.getHealth();
+const metrics = await actuator.getMetrics();
+const prometheus = await actuator.getPrometheusMetrics();
 ```
 
-### Available Endpoints
+**Access via direct method calls** - no HTTP server needed!
+
+## 🔧 Configuration
+
+### LightweightActuatorOptions
+
+```typescript
+interface LightweightActuatorOptions {
+  port?: number;                    // Server port (0 for dynamic, ignored in serverless mode)
+  serverless?: boolean;             // Enable serverless mode (default: false)
+  basePath?: string;                // Base path for endpoints (default: '/actuator')
+  enableHealth?: boolean;           // Enable health checks (default: true)
+  enableMetrics?: boolean;          // Enable system metrics (default: true)
+  enableInfo?: boolean;             // Enable server info (default: true)
+  enableEnv?: boolean;              // Enable environment info (default: true)
+  enablePrometheus?: boolean;       // Enable Prometheus metrics (default: true)
+
+  enableThreadDump?: boolean;       // Enable thread dump (default: true)
+  enableHeapDump?: boolean;         // Enable heap dump (default: true)
+  heapDumpOptions?: {               // Heap dump configuration
+    outputDir?: string;             // Output directory (default: './heapdumps')
+    filename?: string;              // Custom filename
+    includeTimestamp?: boolean;     // Include timestamp in filename (default: true)
+    compress?: boolean;             // Compress heap dump (default: false)
+    maxDepth?: number;              // Maximum depth for analysis
+  };
+  customHealthChecks?: Array<       // Custom health checks
+    (() => Promise<{ status: string; details?: any }>) | {
+      name: string;
+      check: () => Promise<{ status: string; details?: any }>;
+    }
+  >;
+  customMetrics?: Array<{           // Custom Prometheus metrics
+    name: string;
+    help: string;
+    type: 'counter' | 'gauge' | 'histogram';
+  }>;
+
+  healthOptions?: {                 // Health check configuration
+    includeDiskSpace?: boolean;     // Include disk space check (default: true)
+    includeProcess?: boolean;       // Include process check (default: true)
+    diskSpaceThreshold?: number;    // Minimum free disk space in bytes
+    diskSpacePath?: string;         // Path to check disk space for
+    healthCheckTimeout?: number;    // Timeout for health checks in milliseconds
+    customIndicators?: Array<{      // Custom health indicators
+      name: string;
+      check: () => Promise<{ status: string; details?: any }>;
+      enabled?: boolean;
+      critical?: boolean;
+    }>;
+  };
+  retryOptions?: {                  // Retry configuration
+    maxRetries?: number;            // Maximum retry attempts (default: 3)
+    retryDelay?: number;            // Base delay between retries (default: 100ms)
+    exponentialBackoff?: boolean;   // Use exponential backoff (default: true)
+  };
+}
+```
+
+## 🌐 Available Endpoints
+
+### Standalone Mode Endpoints
+
+When running in standalone mode, the following HTTP endpoints are available:
 
 - **Health Check**: `GET /actuator/health`
 - **System Metrics**: `GET /actuator/metrics`
 - **Prometheus Metrics**: `GET /actuator/prometheus`
 - **Server Info**: `GET /actuator/info`
 - **Environment**: `GET /actuator/env`
-- **Thread Dump**: `GET /actuator/threaddump` - Detailed event loop analysis
-- **Heap Dump**: `GET /actuator/heapdump` - V8 heap snapshots and memory analysis
+- **Thread Dump**: `GET /actuator/threaddump`
+- **Heap Dump**: `GET /actuator/heapdump`
 
-## 🔧 Configuration
+
+### Serverless Mode Methods
+
+When running in serverless mode, use these direct data access methods:
 
 ```typescript
-import { LightweightActuator } from 'node-actuator-lite';
+// Health and monitoring
+await actuator.getHealth()                    // Health check data
+await actuator.getMetrics()                   // Application metrics
+await actuator.getPrometheusMetrics()         // Prometheus format
+await actuator.getInfo()                      // Application info
+await actuator.getEnvironment()               // Environment variables
+
+// Diagnostics
+actuator.getThreadDump()                      // Thread dump (synchronous)
+await actuator.getHeapDump()                  // Heap dump (asynchronous)
+
+// Custom metrics
+actuator.getCustomMetric('metric_name')       // Get custom metric instance
+```
+
+## 🚀 Serverless Integration
+
+### Auto-Detection
+
+The library automatically detects serverless environments and warns if `serverless: true` is not set:
+
+```typescript
+// Auto-detected environments:
+// - Vercel (VERCEL_ENV)
+// - Netlify (NETLIFY)
+// - AWS Lambda (AWS_LAMBDA_FUNCTION_NAME)
 
 const actuator = new LightweightActuator({
-  port: 3001,                    // Server port (0 for dynamic)
-  basePath: '/actuator',         // Base path for endpoints
-  enableHealth: true,            // Enable health checks
-  enableMetrics: true,           // Enable system metrics
-  enableInfo: true,              // Enable server info
-  enableEnv: true,               // Enable environment info
-  enablePrometheus: true,        // Enable Prometheus metrics
-  enableThreadDump: true,        // Enable detailed thread dump
-  enableHeapDump: true,          // Enable heap dump with V8 snapshots
-  heapDumpOptions: {             // Heap dump configuration
-    outputDir: './heapdumps',
-    includeTimestamp: true,
-    compress: false
-  },
-  customHealthChecks: [          // Custom health checks
-    async () => ({ status: 'UP', details: { custom: 'check' } })
-  ],
-  customMetrics: [               // Custom Prometheus metrics
-    { name: 'custom_counter', help: 'A custom counter', type: 'counter' }
-  ],
-  healthOptions: {               // Health check options
-    includeDiskSpace: true,
-    includeProcess: true,
-    diskSpaceThreshold: 90,
-    healthCheckTimeout: 5000
-  }
+  serverless: true, // Recommended for serverless
+  // ... other options
 });
 ```
 
-## 🌐 Serverless Integration
+### Important Notes
 
-### Vercel Integration
+⚠️ **Methods Not Available**: The following methods mentioned in some examples are **not implemented** in the current version:
+- `getBeans()`
+- `getConfigProps()`
+- `getMappings()`
 
-Create a Vercel API route for actuator endpoints:
+These are placeholders for future implementation. Use only the methods listed in the "Serverless Mode Methods" section above.
+
+### Vercel Integration Example
 
 ```typescript
 // api/actuator/[...path].ts
@@ -128,40 +223,73 @@ import { LightweightActuator } from 'node-actuator-lite';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const actuator = new LightweightActuator({
-  port: 0,
+  serverless: true,
   enableHealth: true,
   enableMetrics: true,
   enablePrometheus: true,
   enableInfo: true,
-  enableEnv: true
+  enableEnv: true,
+  enableThreadDump: true,
+  enableHeapDump: true,
+  customHealthChecks: [
+    {
+      name: 'database',
+      check: async () => {
+        // Your database health check logic
+        return { status: 'UP', details: { connection: 'ok' } };
+      }
+    }
+  ]
 });
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { path } = req.query;
   const pathString = Array.isArray(path) ? path.join('/') : path || '';
   
-  // Route to appropriate actuator endpoint
-  switch (pathString) {
-    case 'health':
-      const health = await actuator.getHealth();
-      res.json(health);
-      break;
-    case 'metrics':
-      const metrics = await actuator.getMetrics();
-      res.json(metrics);
-      break;
-    case 'prometheus':
-      const prometheus = await actuator.getPrometheusMetrics();
-      res.setHeader('Content-Type', 'text/plain');
-      res.send(prometheus);
-      break;
-    default:
-      res.status(404).json({ error: 'Endpoint not found' });
+  try {
+    switch (pathString) {
+      case 'health':
+        const health = await actuator.getHealth();
+        res.json(health);
+        break;
+      case 'metrics':
+        const metrics = await actuator.getMetrics();
+        res.json(metrics);
+        break;
+      case 'prometheus':
+        const prometheus = await actuator.getPrometheusMetrics();
+        res.setHeader('Content-Type', 'text/plain');
+        res.send(prometheus);
+        break;
+      case 'info':
+        const info = await actuator.getInfo();
+        res.json(info);
+        break;
+      case 'env':
+        const env = await actuator.getEnvironment();
+        res.json(env);
+        break;
+      case 'threaddump':
+        const threadDump = actuator.getThreadDump();
+        res.json(threadDump);
+        break;
+      case 'heapdump':
+        const heapDump = await actuator.getHeapDump();
+        res.json(heapDump);
+        break;
+      default:
+        res.status(404).json({ 
+          error: 'Endpoint not found',
+          availableEndpoints: ['health', 'metrics', 'prometheus', 'info', 'env', 'threaddump', 'heapdump']
+        });
+    }
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
   }
 }
 ```
 
-### AWS Lambda Integration
+### AWS Lambda Integration Example
 
 ```typescript
 // lambda-actuator.ts
@@ -169,14 +297,14 @@ import { LightweightActuator } from 'node-actuator-lite';
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
 const actuator = new LightweightActuator({
-  port: 0,
+  serverless: true,
   enableHealth: true,
   enableMetrics: true,
   enablePrometheus: true
 });
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
-  const path = event.pathParameters?.proxy || '';
+  const path = event.pathParameters?.path || '';
   
   try {
     switch (path) {
@@ -187,12 +315,12 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(health)
         };
-      case 'metrics':
-        const metrics = await actuator.getMetrics();
+      case 'prometheus':
+        const prometheus = await actuator.getPrometheusMetrics();
         return {
           statusCode: 200,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(metrics)
+          headers: { 'Content-Type': 'text/plain' },
+          body: prometheus
         };
       default:
         return {
@@ -209,245 +337,152 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 };
 ```
 
-## 🏗️ Architecture
+## 🏥 Health Checks
 
-### Core Components
+### Built-in Health Checks
 
-- **LightweightActuator**: Main actuator class that orchestrates all functionality
-- **LightweightServer**: Custom HTTP server built with Node.js built-ins (no Express dependency)
-- **HealthChecker**: Health monitoring and custom health checks
-- **MetricsCollector**: System and process metrics collection
-- **InfoCollector**: Application and system information
-- **EnvironmentCollector**: Environment variables and configuration
+- **Disk Space**: Monitors available disk space
+- **Process**: Basic process health information
 
-### Built-in HTTP Server
+### Custom Health Checks
 
-The library includes its own lightweight HTTP server implementation:
+Support both legacy function format and named format:
 
 ```typescript
-import { LightweightServer } from 'node-actuator-lite';
+// Legacy format
+customHealthChecks: [
+  async () => ({ status: 'UP', details: { connection: 'ok' } })
+]
 
-const server = new LightweightServer(3001, '/api');
-
-server.get('/health', async (_req, res) => {
-  res.status(200).json({
-    status: 'UP',
-    timestamp: new Date().toISOString()
-  });
-});
-
-await server.start();
-```
-
-## 🎯 Use Cases
-
-### Serverless Functions (Vercel, AWS Lambda)
-Perfect for monitoring serverless functions with minimal cold start impact:
-
-```typescript
-import { LightweightActuator } from 'node-actuator-lite';
-
-// Minimal configuration for serverless
-const actuator = new LightweightActuator({
-  port: 0,  // Dynamic port
-  enableHealth: true,
-  enableMetrics: true,
-  enablePrometheus: true
-});
-
-// Export for serverless platforms
-export default actuator;
-```
-
-### Microservices
-Lightweight monitoring for microservices:
-
-```typescript
-import { LightweightActuator } from 'node-actuator-lite';
-
-const actuator = new LightweightActuator({
-  port: 3001,
-  basePath: '/monitoring',
-  customHealthChecks: [
-    async () => {
-      // Check database connection
-      const isHealthy = await checkDatabase();
-      return { status: isHealthy ? 'UP' : 'DOWN' };
-    }
-  ]
-});
-```
-
-### Edge Computing
-Minimal footprint for edge computing environments:
-
-```typescript
-import { LightweightActuator } from 'node-actuator-lite';
-
-// Ultra-lightweight configuration
-const actuator = new LightweightActuator({
-  port: 8080,
-  enableHealth: true,
-  enableMetrics: true,
-  enablePrometheus: true
-});
-```
-
-## 📊 Performance Benefits
-
-| Metric | Express Version | Lightweight Version | Improvement |
-|--------|----------------|-------------------|-------------|
-| **Dependencies** | 7 packages (~10.5MB) | 2 packages (~2MB) | **~80% reduction** |
-| **Bundle Size** | Large | Minimal | **~90% smaller** |
-| **Startup Time** | Slower | Faster | **~50% faster** |
-| **Memory Usage** | Higher | Lower | **~30% less** |
-| **Cold Start** | Heavy | Light | **Perfect for serverless** |
-
-## 🔍 Monitoring & Observability
-
-### Health Checks
-Monitor application health with custom checks:
-
-```typescript
-const actuator = new LightweightActuator({
-  customHealthChecks: [
-    async () => {
-      // Database health check
-      const dbHealthy = await checkDatabase();
-      return { 
-        status: dbHealthy ? 'UP' : 'DOWN',
-        details: { database: dbHealthy ? 'connected' : 'disconnected' }
-      };
-    },
-    async () => {
-      // External API health check
-      const apiHealthy = await checkExternalAPI();
-      return { 
-        status: apiHealthy ? 'UP' : 'DOWN',
-        details: { externalApi: apiHealthy ? 'available' : 'unavailable' }
-      };
-    }
-  ]
-});
-```
-
-### Custom Metrics
-Add custom Prometheus metrics:
-
-```typescript
-const actuator = new LightweightActuator({
-  customMetrics: [
-    { name: 'http_requests_total', help: 'Total HTTP requests', type: 'counter' },
-    { name: 'http_request_duration_seconds', help: 'HTTP request duration', type: 'histogram' },
-    { name: 'active_connections', help: 'Active database connections', type: 'gauge' }
-  ]
-});
-
-// Use custom metrics
-const counter = actuator.getCustomMetric('http_requests_total');
-counter.inc();
-
-const gauge = actuator.getCustomMetric('active_connections');
-gauge.set(5);
-```
-
-## 🚀 Deployment Examples
-
-### Vercel Deployment
-```json
-// vercel.json
-{
-  "functions": {
-    "api/actuator/[...path].ts": {
-      "maxDuration": 30
+// Named format (recommended)
+customHealthChecks: [
+  {
+    name: 'database',
+    check: async () => {
+      // Database health check logic
+      return { status: 'UP', details: { connection: 'established' } };
     }
   },
-  "routes": [
-    {
-      "src": "/actuator/(.*)",
-      "dest": "/api/actuator/$1"
+  {
+    name: 'external-api',
+    check: async () => {
+      // External API health check logic
+      return { status: 'UP', details: { responseTime: 150 } };
     }
+  }
+]
+```
+
+## 📊 Metrics
+
+### Built-in Metrics
+
+- System metrics (CPU, memory, disk)
+- Process metrics (uptime, memory usage)
+- HTTP request metrics (when using HTTP endpoints)
+
+### Custom Metrics
+
+```typescript
+customMetrics: [
+  {
+    name: 'app_requests_total',
+    help: 'Total number of application requests',
+    type: 'counter'
+  },
+  {
+    name: 'app_response_time_seconds',
+    help: 'Application response time in seconds',
+    type: 'histogram'
+  },
+  {
+    name: 'app_active_users',
+    help: 'Number of active users',
+    type: 'gauge'
+  }
+]
+
+// Usage
+const requestCounter = actuator.getCustomMetric('app_requests_total');
+requestCounter.inc();
+```
+
+## 🧵 Thread Dump
+
+Provides detailed analysis of the Node.js event loop:
+
+- Main thread information
+- Event loop phases and statistics
+- Async operations tracking
+- Worker threads information
+- Active handles and requests
+- Memory and CPU information
+
+## 💾 Heap Dump
+
+Generates comprehensive memory analysis:
+
+- V8 heap snapshots (Node.js 12+)
+- Memory usage statistics
+- Garbage collection information
+- Loaded modules
+- System information
+- File-based output for analysis
+
+## 🚨 Troubleshooting
+
+### Common Issues
+
+**1. "Cannot start server in serverless environment"**
+```typescript
+// ❌ Wrong - Don't do this in serverless
+const actuator = new LightweightActuator({ port: 3001 });
+
+// ✅ Correct - Use serverless mode
+const actuator = new LightweightActuator({ serverless: true });
+```
+
+**2. "Method not found" errors**
+```typescript
+// ❌ These methods don't exist
+actuator.getBeans();           // Not implemented
+actuator.getConfigProps();     // Not implemented
+actuator.getMappings();        // Not implemented
+
+// ✅ Use these methods instead
+await actuator.getHealth();
+await actuator.getMetrics();
+await actuator.getPrometheusMetrics();
+actuator.getThreadDump();
+await actuator.getHeapDump();
+```
+
+**3. Custom metric label errors**
+```typescript
+// ❌ Wrong - Labels must be defined when creating the metric
+const counter = actuator.getCustomMetric('my_counter');
+counter.inc({ label: 'value' }); // Error!
+
+// ✅ Correct - Define labels in customMetrics configuration
+const actuator = new LightweightActuator({
+  customMetrics: [
+    { name: 'my_counter', help: 'My counter', type: 'counter' }
   ]
-}
+});
+const counter = actuator.getCustomMetric('my_counter');
+counter.inc(); // Works!
 ```
 
-### Docker Compose
-```yaml
-version: '3.8'
-services:
-  app:
-    build: .
-    ports:
-      - "3000:3000"
-    environment:
-      - NODE_ENV=production
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/actuator/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-```
+## 📚 Examples
 
-## 📁 Project Structure
+See the `examples/` directory for comprehensive usage examples:
 
-```
-src/
-├── core/
-│   ├── LightweightActuator.ts    # Main actuator class
-│   └── LightweightServer.ts      # Custom HTTP server (no Express)
-├── health/
-│   └── HealthChecker.ts          # Health check logic
-├── metrics/
-│   └── MetricsCollector.ts       # System metrics collection
-├── info/
-│   └── InfoCollector.ts          # Server information
-├── env/
-│   └── EnvironmentCollector.ts   # Environment variables
-├── utils/
-│   ├── logger.ts                 # Lightweight logging
-│   ├── config.ts                 # Configuration validation
-│   └── ...                       # Other utilities
-└── index.ts                      # Main exports
-```
+- `standalone-example.ts` - Standalone HTTP server usage
+- `serverless-example.ts` - Serverless mode usage
 
-## 🏗️ Building the Project
+## 🔗 Usage Documentation
 
-### Prerequisites
-
-- Node.js >= 14.0.0
-- npm or yarn
-
-### Development Setup
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd node-actuator-lite
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Build the project**
-   ```bash
-   npm run build
-   ```
-
-4. **Run tests**
-   ```bash
-   npm test
-   ```
-
-### Available Scripts
-
-- `npm run build` - Build the TypeScript project
-- `npm run dev` - Start development mode with hot reload
-- `npm start` - Start the built application
-- `npm test` - Run test suite
-- `npm run test:watch` - Run tests in watch mode
-- `npm run test:coverage` - Run tests with coverage report
+For detailed usage examples and integration patterns, see [USAGE.md](./USAGE.md).
 
 ## 🤝 Contributing
 
@@ -459,11 +494,10 @@ src/
 
 ## 📄 License
 
-MIT License - see LICENSE file for details.
+MIT License - see [LICENSE](./LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
 - Inspired by Spring Boot Actuator
-- Built for the Node.js community
-- Optimized for modern deployment scenarios
-- Perfect for serverless and microservices architectures 
+- Built with Prometheus client library
+- Optimized for serverless environments

@@ -31,12 +31,18 @@ export interface HealthCheckerOptions {
 }
 
 export class HealthChecker {
-  private customHealthChecks: Array<() => Promise<{ status: string; details?: any }>>;
+  private customHealthChecks: Array<(() => Promise<{ status: string; details?: any }>) | {
+    name: string;
+    check: () => Promise<{ status: string; details?: any }>;
+  }>;
   private options: HealthCheckerOptions;
   private builtInIndicators: HealthIndicator[];
 
   constructor(
-    customHealthChecks: Array<() => Promise<{ status: string; details?: any }>> = [],
+    customHealthChecks: Array<(() => Promise<{ status: string; details?: any }>) | {
+      name: string;
+      check: () => Promise<{ status: string; details?: any }>;
+    }> = [],
     options: HealthCheckerOptions = {}
   ) {
     this.customHealthChecks = customHealthChecks;
@@ -122,22 +128,37 @@ export class HealthChecker {
         }
       }
 
-      // Run legacy custom health checks
+      // Run custom health checks (supporting both function and named formats)
       for (let i = 0; i < this.customHealthChecks.length; i++) {
+        const healthCheck = this.customHealthChecks[i]!;
         try {
+          let checkFunction: () => Promise<{ status: string; details?: any }>;
+          let checkName: string;
+
+          if (typeof healthCheck === 'function') {
+            // Legacy function format
+            checkFunction = healthCheck;
+            checkName = `custom-${i}`;
+          } else {
+            // Named format
+            checkFunction = healthCheck.check;
+            checkName = healthCheck.name;
+          }
+
           const customCheck = await withTimeout(
-            this.customHealthChecks[i]!(),
+            checkFunction(),
             timeout,
-            `Legacy health check 'custom-${i}' timed out after ${timeout}ms`
+            `Health check '${checkName}' timed out after ${timeout}ms`
           );
           checks.push({
-            name: `custom-${i}`,
+            name: checkName,
             status: customCheck.status as 'UP' | 'DOWN' | 'UNKNOWN',
             details: customCheck.details
           });
         } catch (error) {
+          const checkName = typeof healthCheck === 'function' ? `custom-${i}` : healthCheck.name;
           checks.push({
-            name: `custom-${i}`,
+            name: checkName,
             status: 'DOWN',
             details: { error: error instanceof Error ? error.message : 'Unknown error' }
           });

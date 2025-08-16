@@ -9,6 +9,7 @@ import { validateConfig, ValidatedActuatorOptions } from '../utils/config';
 
 export interface LightweightActuatorOptions {
   port?: number;
+  serverless?: boolean; // New option for serverless environments
   basePath?: string;
   enableHealth?: boolean;
   enableMetrics?: boolean;
@@ -27,7 +28,10 @@ export interface LightweightActuatorOptions {
     compress?: boolean;
     maxDepth?: number;
   };
-  customHealthChecks?: Array<() => Promise<{ status: string; details?: any }>>;
+  customHealthChecks?: Array<(() => Promise<{ status: string; details?: any }>) | {
+    name: string;
+    check: () => Promise<{ status: string; details?: any }>;
+  }>;
   customMetrics?: Array<{ name: string; help: string; type: 'counter' | 'gauge' | 'histogram' }>;
   customBeans?: Record<string, any>;
   customConfigProps?: Record<string, any>;
@@ -52,7 +56,7 @@ export interface LightweightActuatorOptions {
 }
 
 export class LightweightActuator {
-  private server: LightweightServer;
+  private server?: LightweightServer;
   private port: number;
   private basePath: string;
   private healthChecker: HealthChecker;
@@ -73,9 +77,16 @@ export class LightweightActuator {
   private static httpRequestDuration: Histogram;
 
   constructor(options: LightweightActuatorOptions = {}) {
+    // Auto-detect serverless environments
+    const isServerlessEnv = process.env['VERCEL_ENV'] || process.env['NETLIFY'] || process.env['AWS_LAMBDA_FUNCTION_NAME'];
+    if (isServerlessEnv && !options.serverless) {
+      console.warn('node-actuator-lite: Detected serverless environment. Consider using serverless: true option.');
+    }
+
     // Validate configuration
     const validatedOptions = validateConfig({
       port: 0,
+      serverless: false,
       basePath: '/actuator',
       enableHealth: true,
       enableMetrics: true,
@@ -98,8 +109,10 @@ export class LightweightActuator {
     this.port = this.options.port;
     this.basePath = this.options.basePath;
 
-    // Initialize lightweight server
-    this.server = new LightweightServer(this.port, this.basePath);
+    // Initialize lightweight server only if not in serverless mode
+    if (!this.options.serverless) {
+      this.server = new LightweightServer(this.port, this.basePath);
+    }
 
     // Initialize collectors
     this.healthChecker = new HealthChecker(
@@ -196,6 +209,8 @@ export class LightweightActuator {
   }
 
   private setupRoutes(): void {
+    if (!this.server) return; // Skip if in serverless mode
+    
     // Health endpoint
     if (this.options.enableHealth) {
       this.server.get('/health', async (_req: Request, res: Response) => {
@@ -306,6 +321,15 @@ export class LightweightActuator {
   }
 
   public async start(): Promise<number> {
+    if (this.options.serverless) {
+      logger.info('🚀 Lightweight Actuator initialized in serverless mode');
+      return 0;
+    }
+    
+    if (!this.server) {
+      throw new Error('Server not initialized. Cannot start in serverless mode.');
+    }
+    
     try {
       const port = await this.server.start();
       logger.info('🚀 Lightweight Actuator started successfully', { 
@@ -328,6 +352,11 @@ export class LightweightActuator {
   }
 
   public async stop(): Promise<void> {
+    if (this.options.serverless || !this.server) {
+      logger.info('✅ Lightweight Actuator shutdown completed (serverless mode)');
+      return;
+    }
+    
     try {
       await this.server.stop();
       logger.info('✅ Lightweight Actuator shutdown completed');
@@ -337,6 +366,9 @@ export class LightweightActuator {
   }
 
   public getPort(): number {
+    if (this.options.serverless || !this.server) {
+      return 0;
+    }
     return this.server.getPort();
   }
 
@@ -346,6 +378,84 @@ export class LightweightActuator {
 
   public getCustomMetric(name: string): any {
     return this.customMetrics.get(name);
+  }
+
+  // Direct data access methods for serverless environments
+  public async getHealth(): Promise<any> {
+    try {
+      return await this.healthChecker.check();
+    } catch (error) {
+      logger.error('Health check failed', { error: error instanceof Error ? error.message : 'Unknown error' });
+      return {
+        status: 'DOWN',
+        error: 'Health check failed',
+        timestamp: new Date().toISOString()
+      };
+    }
+  }
+
+  public async getMetrics(): Promise<any> {
+    try {
+      return await this.metricsCollector.collect();
+    } catch (error) {
+      logger.error('Metrics collection failed', { error: error instanceof Error ? error.message : 'Unknown error' });
+      throw error;
+    }
+  }
+
+  public async getPrometheusMetrics(): Promise<string> {
+    try {
+      return await register.metrics();
+    } catch (error) {
+      logger.error('Prometheus metrics failed', { error: error instanceof Error ? error.message : 'Unknown error' });
+      throw error;
+    }
+  }
+
+  public async getInfo(): Promise<any> {
+    try {
+      return await this.infoCollector.collect();
+    } catch (error) {
+      logger.error('Info collection failed', { error: error instanceof Error ? error.message : 'Unknown error' });
+      throw error;
+    }
+  }
+
+  public async getEnvironment(): Promise<any> {
+    try {
+      return await this.envCollector.collect();
+    } catch (error) {
+      logger.error('Environment collection failed', { error: error instanceof Error ? error.message : 'Unknown error' });
+      throw error;
+    }
+  }
+
+  public getThreadDump(): any {
+    try {
+      return this.generateThreadDump();
+    } catch (error) {
+      logger.error('Thread dump generation failed', { error: error instanceof Error ? error.message : 'Unknown error' });
+      return {
+        error: 'Thread dump generation failed',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date().toISOString(),
+        pid: process.pid
+      };
+    }
+  }
+
+  public async getHeapDump(): Promise<any> {
+    try {
+      return await this.generateHeapDump();
+    } catch (error) {
+      logger.error('Heap dump generation failed', { error: error instanceof Error ? error.message : 'Unknown error' });
+      return {
+        error: 'Heap dump generation failed',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date().toISOString(),
+        pid: process.pid
+      };
+    }
   }
 
   private generateThreadDump(): any {

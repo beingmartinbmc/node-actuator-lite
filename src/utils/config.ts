@@ -2,6 +2,7 @@ import logger from './logger';
 
 export interface ValidatedActuatorOptions {
   port: number;
+  serverless: boolean;
   basePath: string;
   enableHealth: boolean;
   enableMetrics: boolean;
@@ -52,6 +53,11 @@ export function validateConfig(options: any): ValidatedActuatorOptions {
     if (typeof options.port !== 'number' || options.port < 0 || options.port > 65535) {
       errors.push('Port must be a number between 0 and 65535');
     }
+  }
+
+  // Validate serverless
+  if (options.serverless !== undefined && typeof options.serverless !== 'boolean') {
+    errors.push('serverless must be a boolean');
   }
 
   // Validate basePath
