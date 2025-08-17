@@ -1,5 +1,11 @@
 # Node Actuator Lite
 
+[![npm version](https://badge.fury.io/js/node-actuator-lite.svg)](https://badge.fury.io/js/node-actuator-lite)
+[![npm downloads](https://img.shields.io/npm/dm/node-actuator-lite.svg)](https://www.npmjs.com/package/node-actuator-lite)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![CI](https://github.com/beingmartinbmc/node-actuator-lite/workflows/CI/badge.svg)](https://github.com/beingmartinbmc/node-actuator-lite/actions)
+[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)](https://github.com/beingmartinbmc/node-actuator-lite)
+
 A lightweight Node.js actuator similar to Spring Boot actuator with Prometheus integration, built with minimal external dependencies for maximum performance and minimal footprint. Perfect for **serverless platforms** like Vercel, AWS Lambda, and microservices.
 
 ## 🚀 Key Features
