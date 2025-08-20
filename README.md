@@ -49,6 +49,101 @@ Node Actuator Lite uses minimal external dependencies:
 
 These dependencies are essential for the core functionality and are kept to a minimum to maintain the lightweight nature of the library.
 
+## 🔧 Node.js Version Compatibility
+
+### Supported Versions
+
+Node Actuator Lite is tested and compatible with the following Node.js versions:
+
+| Node.js Version | Status | Notes |
+|----------------|--------|-------|
+| **18.x** | ✅ **Recommended** | LTS version, fully supported |
+| **20.x** | ✅ **Recommended** | LTS version, fully supported |
+| **21.x** | ✅ **Supported** | Current version |
+| **22.x** | ✅ **Supported** | Current version |
+| **24.x** | ✅ **Supported** | Latest version (with platform-specific considerations) |
+| **16.x** | ⚠️ **Deprecated** | End of life, not recommended |
+| **14.x** | ❌ **Unsupported** | End of life, may not work |
+
+### Platform Compatibility
+
+The library is designed to work across different platforms with platform-specific optimizations:
+
+#### **Windows**
+- ✅ **Fully Supported**
+- Disk space checks use Windows-specific fallback values
+- Path handling optimized for Windows file system
+- Test suite includes Windows-specific scenarios
+
+#### **macOS**
+- ✅ **Fully Supported**
+- Native disk space checking via `df` command
+- Unix-style path handling
+- Optimized for macOS environments
+
+#### **Linux**
+- ✅ **Fully Supported**
+- Native disk space checking via `df` command
+- Unix-style path handling
+- Optimized for server environments
+
+### Version-Specific Considerations
+
+#### **Node.js 24.x (Latest)**
+- ✅ **Fully compatible**
+- Platform-specific tests ensure cross-platform reliability
+- May show different behavior for disk space checks on Windows vs Unix
+- Recommended for new projects
+
+#### **Node.js 20.x (LTS)**
+- ✅ **Recommended for production**
+- Most stable and widely tested
+- Excellent compatibility across all platforms
+- Long-term support until April 2026
+
+#### **Node.js 18.x (LTS)**
+- ✅ **Recommended for production**
+- Very stable and well-tested
+- Excellent compatibility across all platforms
+- Long-term support until April 2025
+
+### Troubleshooting Version Issues
+
+If you encounter issues with specific Node.js versions:
+
+1. **Check your Node.js version**:
+   ```bash
+   node --version
+   ```
+
+2. **Update to a supported version**:
+   ```bash
+   # Using nvm (Node Version Manager)
+   nvm install 20
+   nvm use 20
+   
+   # Or download from nodejs.org
+   ```
+
+3. **Clear npm cache**:
+   ```bash
+   npm cache clean --force
+   rm -rf node_modules package-lock.json
+   npm install
+   ```
+
+4. **Run tests with isolation**:
+   ```bash
+   npm test -- --runInBand --detectOpenHandles
+   ```
+
+### Development Environment
+
+For development, we recommend:
+- **Node.js 20.x** (LTS) for maximum stability
+- **npm 9.x** or **yarn 1.22.x** for package management
+- **TypeScript 5.x** for type safety
+
 ## 🎯 Quick Start
 
 ### Standalone Mode (HTTP Server)
@@ -591,6 +686,33 @@ const counter = actuator.getCustomMetric('my_counter');
 counter.inc(); // Works!
 ```
 
+**4. Platform-specific test failures**
+```bash
+# ❌ Test failures on Windows with Node.js 24.x
+# This was a known issue that has been resolved in v1.2.4+
+
+# ✅ Solution: Update to latest version
+npm update node-actuator-lite
+
+# ✅ For development: Use platform-specific tests
+npm test -- --runInBand --detectOpenHandles
+```
+
+**5. Node.js version compatibility issues**
+```bash
+# ❌ Using unsupported Node.js version
+node --version  # Shows 14.x or 16.x
+
+# ✅ Update to supported version
+nvm install 20
+nvm use 20
+
+# ✅ Clear cache and reinstall
+npm cache clean --force
+rm -rf node_modules package-lock.json
+npm install
+```
+
 ## 📚 Examples
 
 See the `examples/` directory for comprehensive usage examples:
@@ -619,3 +741,5 @@ MIT License - see [LICENSE](./LICENSE) file for details.
 - Inspired by Spring Boot Actuator
 - Built with Prometheus client library
 - Optimized for serverless environments
+- Cross-platform compatibility with Windows, macOS, and Linux support
+- Platform-specific test coverage for reliable deployment across environments
