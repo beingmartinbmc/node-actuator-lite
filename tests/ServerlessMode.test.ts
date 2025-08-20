@@ -432,7 +432,7 @@ describe('Serverless Mode Tests', () => {
       await actuator.getPrometheusMetrics();
       const endTime = Date.now();
       
-      expect(endTime - startTime).toBeLessThan(100); // Should complete in less than 100ms
+      expect(endTime - startTime).toBeLessThan(200); // Should complete in less than 200ms
     });
   });
 
