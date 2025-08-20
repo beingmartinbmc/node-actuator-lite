@@ -18,11 +18,12 @@ describe('HealthChecker', () => {
     });
 
     test('should initialize with custom options', () => {
+      const customDiskPath = process.platform === 'win32' ? 'C:\\temp' : '/tmp';
       const customOptions: HealthCheckerOptions = {
         includeDiskSpace: false,
         includeProcess: false,
         diskSpaceThreshold: 50 * 1024 * 1024, // 50MB
-        diskSpacePath: '/tmp'
+        diskSpacePath: customDiskPath
       };
 
       const customHealthChecker = new HealthChecker([], customOptions);
@@ -31,7 +32,7 @@ describe('HealthChecker', () => {
       expect(options.includeDiskSpace).toBe(false);
       expect(options.includeProcess).toBe(false);
       expect(options.diskSpaceThreshold).toBe(50 * 1024 * 1024);
-      expect(options.diskSpacePath).toBe('/tmp');
+      expect(options.diskSpacePath).toBe(customDiskPath);
     });
   });
 
