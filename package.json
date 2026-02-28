@@ -1,6 +1,6 @@
 {
   "name": "node-actuator-lite",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Spring Boot Actuator for Node.js — health (shallow/deep), env, threaddump, heapdump, prometheus",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
