@@ -1,10 +1,19 @@
 # Node Actuator Lite
 
+[![CI](https://github.com/beingmartinbmc/node-actuator-lite/actions/workflows/ci.yml/badge.svg)](https://github.com/beingmartinbmc/node-actuator-lite/actions/workflows/ci.yml)
 [![npm version](https://badge.fury.io/js/node-actuator-lite.svg)](https://badge.fury.io/js/node-actuator-lite)
 [![npm downloads](https://img.shields.io/npm/dm/node-actuator-lite.svg)](https://www.npmjs.com/package/node-actuator-lite)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Spring Boot Actuator for Node.js — production-ready monitoring endpoints with a single dependency.
+
+<p align="center">
+  <img src="./assets/demo.gif" alt="node-actuator-lite demo" width="700" />
+</p>
+
+## Why?
+
+If you're coming from Spring Boot, you expect `/actuator/health`, `/actuator/env`, and `/actuator/prometheus` out of the box. This library gives you exactly that for Node.js — **one dependency, zero config, works with any framework or serverless**.
 
 ## Features
 
@@ -57,6 +66,36 @@ const actuator = new NodeActuator({
 
 await actuator.start();
 // Actuator listening on http://localhost:8081/actuator
+```
+
+### Express (one-liner)
+
+```typescript
+import express from 'express';
+import { actuatorMiddleware } from 'node-actuator-lite';
+
+const app = express();
+const { handler, actuator } = actuatorMiddleware({ prometheus: { defaultMetrics: true } });
+app.use(handler);
+
+// All /actuator/* endpoints are now live.
+// Access the actuator instance for custom metrics:
+// actuator.prometheus.metric('my_counter')!.inc();
+
+app.listen(3000);
+```
+
+### Fastify (plugin)
+
+```typescript
+import Fastify from 'fastify';
+import { actuatorPlugin } from 'node-actuator-lite';
+
+const app = Fastify();
+await app.register(actuatorPlugin, { prometheus: { defaultMetrics: true } });
+// All /actuator/* routes registered. Access via app.actuator.
+
+await app.listen({ port: 3000 });
 ```
 
 ### Serverless (Vercel, Lambda, etc.)
