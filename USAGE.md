@@ -7,6 +7,7 @@ Detailed usage examples for `node-actuator-lite` — a Spring Boot Actuator equi
 ## Table of Contents
 
 - [Quick Start](#quick-start)
+- [Production Safety](#production-safety)
 - [Standalone Mode](#standalone-mode)
 - [Serverless Mode](#serverless-mode)
 - [Health Checks](#health-checks)
@@ -32,6 +33,31 @@ const actuator = new NodeActuator({ port: 8081 });
 await actuator.start();
 // Endpoints available at http://localhost:8081/actuator
 ```
+
+## Production Safety
+
+Actuator data is useful because it is detailed, but that also makes some endpoints sensitive. Do not expose `/actuator/env`, `/actuator/threaddump`, or `/actuator/heapdump` on the public internet without authentication, network controls, or a temporary debugging process.
+
+Use this baseline for internet-facing services:
+
+```ts
+const actuator = new NodeActuator({
+  port: 8081,
+  health: {
+    showDetails: 'never',
+    groups: {
+      liveness: ['process'],
+      readiness: ['diskSpace'],
+    },
+  },
+  env: { enabled: false },
+  threadDump: { enabled: false },
+  heapDump: { enabled: false },
+  prometheus: { enabled: true },
+});
+```
+
+If you mount the Express or Fastify adapter into your main application, place it after your authentication middleware or protect the `/actuator` path at your reverse proxy.
 
 ## Standalone Mode
 

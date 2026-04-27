@@ -1,6 +1,6 @@
 {
   "name": "node-actuator-lite",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "description": "Spring Boot Actuator for Node.js — health (shallow/deep), env, threaddump, heapdump, prometheus",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,6 +11,10 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
+    "typecheck": "tsc --noEmit",
+    "test:package": "node tests/package-smoke.cjs",
+    "audit:prod": "npm audit --omit=dev",
+    "pack:dry-run": "npm pack --dry-run",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -36,10 +40,34 @@
     "url": "https://github.com/beingmartinbmc/node-actuator-lite/issues"
   },
   "homepage": "https://github.com/beingmartinbmc/node-actuator-lite#readme",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./middleware/express": {
+      "types": "./dist/middleware/express.d.ts",
+      "require": "./dist/middleware/express.js",
+      "default": "./dist/middleware/express.js"
+    },
+    "./middleware/fastify": {
+      "types": "./dist/middleware/fastify.d.ts",
+      "require": "./dist/middleware/fastify.js",
+      "default": "./dist/middleware/fastify.js"
+    },
+    "./dist/*": "./dist/*",
+    "./package.json": "./package.json"
+  },
   "files": [
     "dist/**/*.js",
     "dist/**/*.d.ts",
     "README.md",
+    "USAGE.md",
+    "SECURITY.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "examples/**/*",
     "LICENSE"
   ],
   "dependencies": {
