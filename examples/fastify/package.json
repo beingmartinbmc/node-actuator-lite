@@ -1,0 +1,12 @@
+{
+  "name": "node-actuator-lite-fastify-example",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.cjs"
+  },
+  "dependencies": {
+    "fastify": "^4.28.1",
+    "node-actuator-lite": "latest"
+  }
+}

@@ -28,6 +28,13 @@ export function actuatorMiddleware(options: ActuatorOptions = {}): ActuatorMiddl
   const opts: ActuatorOptions = { ...options, serverless: true };
   const actuator = new NodeActuator(opts);
   const basePath = opts.basePath ?? '/actuator';
+  const enabled = {
+    health: opts.health?.enabled ?? true,
+    env: opts.env?.enabled ?? true,
+    threadDump: opts.threadDump?.enabled ?? true,
+    heapDump: opts.heapDump?.enabled ?? true,
+    prometheus: opts.prometheus?.enabled ?? true,
+  };
 
   const handler: ExpressMiddleware = async (req: any, res: any, next: any) => {
     const url: string = req.originalUrl || req.url || '';
@@ -45,13 +52,13 @@ export function actuatorMiddleware(options: ActuatorOptions = {}): ActuatorMiddl
       }
 
       // Health
-      if (subPath === '/health' && method === 'GET') {
+      if (enabled.health && subPath === '/health' && method === 'GET') {
         const result = await actuator.getHealth(query.showDetails);
         return res.status(result.status === 'UP' ? 200 : 503).json(result);
       }
 
       const healthMatch = subPath.match(/^\/health\/(.+)$/);
-      if (healthMatch && method === 'GET') {
+      if (enabled.health && healthMatch && method === 'GET') {
         const name = decodeURIComponent(healthMatch[1]!);
         const group = await actuator.getHealthGroup(name);
         if (group) return res.status(group.status === 'UP' ? 200 : 503).json(group);
@@ -61,29 +68,29 @@ export function actuatorMiddleware(options: ActuatorOptions = {}): ActuatorMiddl
       }
 
       // Environment
-      if (subPath === '/env' && method === 'GET') {
+      if (enabled.env && subPath === '/env' && method === 'GET') {
         return res.json(actuator.getEnv());
       }
 
       const envMatch = subPath.match(/^\/env\/(.+)$/);
-      if (envMatch && method === 'GET') {
+      if (enabled.env && envMatch && method === 'GET') {
         const name = decodeURIComponent(envMatch[1]!);
         const v = actuator.getEnvVariable(name);
         return v ? res.json(v) : res.status(404).json({ error: `Variable '${name}' not found` });
       }
 
       // Thread dump
-      if (subPath === '/threaddump' && method === 'GET') {
+      if (enabled.threadDump && subPath === '/threaddump' && method === 'GET') {
         return res.json(actuator.getThreadDump());
       }
 
       // Heap dump
-      if (subPath === '/heapdump' && method === 'POST') {
+      if (enabled.heapDump && subPath === '/heapdump' && method === 'POST') {
         return res.json(await actuator.getHeapDump());
       }
 
       // Prometheus
-      if (subPath === '/prometheus' && method === 'GET') {
+      if (enabled.prometheus && subPath === '/prometheus' && method === 'GET') {
         res.set('Content-Type', 'text/plain; charset=utf-8');
         return res.send(await actuator.getPrometheus());
       }

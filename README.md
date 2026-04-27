@@ -5,15 +5,38 @@
 [![npm downloads](https://img.shields.io/npm/dm/node-actuator-lite.svg)](https://www.npmjs.com/package/node-actuator-lite)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Spring Boot Actuator for Node.js — production-ready monitoring endpoints with a single dependency.
-
-<p align="center">
-  <img src="./assets/demo.gif" alt="node-actuator-lite demo" width="700" />
-</p>
+Spring Boot Actuator for Node.js — lightweight monitoring endpoints with a single dependency.
 
 ## Why?
 
 If you're coming from Spring Boot, you expect `/actuator/health`, `/actuator/env`, and `/actuator/prometheus` out of the box. This library gives you exactly that for Node.js — **one dependency, zero config, works with any framework or serverless**.
+
+## Production Safety
+
+Actuator endpoints expose operational data. Keep them on a private network, behind authentication, or disabled unless you explicitly need them. This is especially important for `/actuator/env`, `/actuator/threaddump`, and `/actuator/heapdump`.
+
+Recommended public-facing baseline:
+
+```typescript
+import { NodeActuator } from 'node-actuator-lite';
+
+const actuator = new NodeActuator({
+  port: 8081,
+  health: {
+    showDetails: 'never',
+    groups: {
+      liveness: ['process'],
+      readiness: ['diskSpace'],
+    },
+  },
+  env: { enabled: false },
+  threadDump: { enabled: false },
+  heapDump: { enabled: false },
+  prometheus: { enabled: true },
+});
+```
+
+For Express/Fastify, mount the actuator middleware behind your existing auth or network allowlist. Enable `env`, `threaddump`, or `heapdump` only for trusted operators and short-lived debugging sessions.
 
 ## Features
 
@@ -33,6 +56,15 @@ npm install node-actuator-lite
 ```
 
 > Requires **Node.js >= 18**.
+
+## Try It
+
+Runnable examples live in [`examples/`](./examples):
+
+- Express app with bearer-token protected actuator routes
+- Fastify app with safe endpoint defaults
+- AWS Lambda handler using serverless mode
+- Kubernetes deployment probes for liveness and readiness
 
 ## Quick Start
 
@@ -475,10 +507,11 @@ await actuator.getPrometheus();
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes with tests
-4. Submit a pull request
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup and release checks.
+
+Security issues should be reported privately; see [SECURITY.md](./SECURITY.md).
+
+Release notes are tracked in [CHANGELOG.md](./CHANGELOG.md).
 
 ## License
 

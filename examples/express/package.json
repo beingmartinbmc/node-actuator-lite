@@ -1,0 +1,12 @@
+{
+  "name": "node-actuator-lite-express-example",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.cjs"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "node-actuator-lite": "latest"
+  }
+}
