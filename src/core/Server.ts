@@ -46,6 +46,10 @@ export class ActuatorServer {
     this.addRoute('POST', path, handler);
   }
 
+  route(method: string, path: string, handler: RouteHandler): void {
+    this.addRoute(method.toUpperCase(), path, handler);
+  }
+
   private addRoute(method: string, path: string, handler: RouteHandler): void {
     const paramNames: string[] = [];
     const regexStr = path.replace(/:([^/]+)/g, (_match, name) => {
