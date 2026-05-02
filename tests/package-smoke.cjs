@@ -26,6 +26,8 @@ assert.deepEqual(Object.keys(actuator.discovery()._links), [
   'self',
   'health',
   'health-component',
+  'info',
+  'metrics',
 ]);
 
 console.log('Package smoke test passed.');
