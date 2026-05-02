@@ -85,4 +85,58 @@ describe('ThreadDumpCollector', () => {
     // Timestamps should differ (or be very close)
     expect(td2.uptime).toBeGreaterThanOrEqual(td1.uptime);
   });
+
+  test('activeHandles falls back to empty when _getActiveHandles throws', () => {
+    const orig = (process as any)._getActiveHandles;
+    (process as any)._getActiveHandles = () => {
+      throw new Error('handles boom');
+    };
+    try {
+      const td = collector.collect();
+      expect(td.eventLoop.activeHandles.count).toBe(0);
+      expect(td.eventLoop.activeHandles.types).toEqual([]);
+    } finally {
+      (process as any)._getActiveHandles = orig;
+    }
+  });
+
+  test('activeRequests falls back to empty when _getActiveRequests throws', () => {
+    const orig = (process as any)._getActiveRequests;
+    (process as any)._getActiveRequests = () => {
+      throw new Error('requests boom');
+    };
+    try {
+      const td = collector.collect();
+      expect(td.eventLoop.activeRequests.count).toBe(0);
+      expect(td.eventLoop.activeRequests.types).toEqual([]);
+    } finally {
+      (process as any)._getActiveRequests = orig;
+    }
+  });
+
+  test('handle/request types fall back to "Unknown" when constructor is missing', () => {
+    const origH = (process as any)._getActiveHandles;
+    const origR = (process as any)._getActiveRequests;
+    (process as any)._getActiveHandles = () => [Object.create(null), null];
+    (process as any)._getActiveRequests = () => [Object.create(null), null];
+    try {
+      const td = collector.collect();
+      expect(td.eventLoop.activeHandles.types).toEqual(['Unknown', 'Unknown']);
+      expect(td.eventLoop.activeRequests.types).toEqual(['Unknown', 'Unknown']);
+    } finally {
+      (process as any)._getActiveHandles = origH;
+      (process as any)._getActiveRequests = origR;
+    }
+  });
+
+  test('resourceUsage is null when process.resourceUsage is unavailable', () => {
+    const orig = process.resourceUsage;
+    (process as any).resourceUsage = undefined;
+    try {
+      const td = collector.collect();
+      expect(td.resourceUsage).toBeNull();
+    } finally {
+      (process as any).resourceUsage = orig;
+    }
+  });
 });

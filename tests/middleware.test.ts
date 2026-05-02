@@ -158,6 +158,145 @@ describe('actuatorMiddleware', () => {
     expect(typeof promRes.body).toBe('string');
   });
 
+  test('returns 404 for missing health/env names and supports group lookup', async () => {
+    const { handler } = actuatorMiddleware({
+      prometheus: { defaultMetrics: false },
+      health: {
+        groups: { liveness: ['process'] } as any,
+      },
+    });
+    const next = jest.fn();
+
+    // Health group lookup
+    const groupRes = createMockResponse();
+    await Promise.resolve(handler(
+      { originalUrl: '/actuator/health/liveness', url: '/actuator/health/liveness', method: 'GET', query: {} },
+      groupRes,
+      next,
+    ));
+    expect(groupRes.body.status).toBeDefined();
+
+    // Health component lookup (existing component)
+    const compRes = createMockResponse();
+    await Promise.resolve(handler(
+      { originalUrl: '/actuator/health/process', url: '/actuator/health/process', method: 'GET', query: {} },
+      compRes,
+      next,
+    ));
+    expect(compRes.body.status).toBeDefined();
+
+    // Health name not found - 404 branch
+    const missingHealth = createMockResponse();
+    await Promise.resolve(handler(
+      { originalUrl: '/actuator/health/__missing__', url: '/actuator/health/__missing__', method: 'GET', query: {} },
+      missingHealth,
+      next,
+    ));
+    expect(missingHealth.status).toHaveBeenCalledWith(404);
+
+    // Env variable not found - 404 branch
+    const missingEnv = createMockResponse();
+    await Promise.resolve(handler(
+      { originalUrl: '/actuator/env/__NOT_SET__', url: '/actuator/env/__NOT_SET__', method: 'GET', query: {} },
+      missingEnv,
+      next,
+    ));
+    expect(missingEnv.status).toHaveBeenCalledWith(404);
+
+    // Discovery sub-path '/' alias
+    const discoveryRes = createMockResponse();
+    await Promise.resolve(handler(
+      { originalUrl: '/actuator/', url: '/actuator/', method: 'GET', query: {} },
+      discoveryRes,
+      next,
+    ));
+    expect(discoveryRes.body._links).toBeDefined();
+  });
+
+  test('skips routes with mismatched method', async () => {
+    const { handler } = actuatorMiddleware({ prometheus: { defaultMetrics: false } });
+    const next = jest.fn();
+
+    // POST to /health (which is GET-only) should fall through to 404
+    const healthPostRes = createMockResponse();
+    await Promise.resolve(handler(
+      { originalUrl: '/actuator/health', url: '/actuator/health', method: 'POST', query: {} },
+      healthPostRes,
+      next,
+    ));
+    expect(healthPostRes.status).toHaveBeenCalledWith(404);
+
+    // POST to /health/process (param route, GET-only) → 404
+    const healthCompPostRes = createMockResponse();
+    await Promise.resolve(handler(
+      { originalUrl: '/actuator/health/process', url: '/actuator/health/process', method: 'POST', query: {} },
+      healthCompPostRes,
+      next,
+    ));
+    expect(healthCompPostRes.status).toHaveBeenCalledWith(404);
+
+    // POST to /env (GET-only) → 404
+    const envPostRes = createMockResponse();
+    await Promise.resolve(handler(
+      { originalUrl: '/actuator/env', url: '/actuator/env', method: 'POST', query: {} },
+      envPostRes,
+      next,
+    ));
+    expect(envPostRes.status).toHaveBeenCalledWith(404);
+
+    // POST to /env/FOO (GET-only) → 404
+    const envVarPostRes = createMockResponse();
+    await Promise.resolve(handler(
+      { originalUrl: '/actuator/env/PATH', url: '/actuator/env/PATH', method: 'POST', query: {} },
+      envVarPostRes,
+      next,
+    ));
+    expect(envVarPostRes.status).toHaveBeenCalledWith(404);
+
+    // GET to /heapdump (POST-only) → 404
+    const heapGetRes = createMockResponse();
+    await Promise.resolve(handler(
+      { originalUrl: '/actuator/heapdump', url: '/actuator/heapdump', method: 'GET', query: {} },
+      heapGetRes,
+      next,
+    ));
+    expect(heapGetRes.status).toHaveBeenCalledWith(404);
+  });
+
+  test('returns 404 for known paths when their feature is disabled', async () => {
+    const { handler } = actuatorMiddleware({
+      prometheus: { defaultMetrics: false, enabled: false },
+      health: { enabled: false },
+      env: { enabled: false },
+      threadDump: { enabled: false },
+      heapDump: { enabled: false },
+      info: { enabled: false } as any,
+      metrics: { enabled: false } as any,
+    });
+    const next = jest.fn();
+
+    const paths = [
+      '/actuator/health',
+      '/actuator/health/process',
+      '/actuator/env',
+      '/actuator/env/PATH',
+      '/actuator/threaddump',
+      '/actuator/prometheus',
+      '/actuator/info',
+      '/actuator/metrics',
+    ];
+
+    for (const path of paths) {
+      const res = createMockResponse();
+      await Promise.resolve(handler(
+        { originalUrl: path, url: path, method: 'GET', query: {} },
+        res,
+        next,
+      ));
+      expect(res.status).toHaveBeenCalledWith(404);
+    }
+  });
+
   test('returns 500 when endpoint handler throws', async () => {
     const { handler } = actuatorMiddleware({
       prometheus: { defaultMetrics: false },
