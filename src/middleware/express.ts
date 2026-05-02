@@ -34,6 +34,8 @@ export function actuatorMiddleware(options: ActuatorOptions = {}): ActuatorMiddl
     threadDump: opts.threadDump?.enabled ?? true,
     heapDump: opts.heapDump?.enabled ?? true,
     prometheus: opts.prometheus?.enabled ?? true,
+    info: opts.info?.enabled ?? true,
+    metrics: opts.metrics?.enabled ?? true,
   };
 
   const handler: ExpressMiddleware = async (req: any, res: any, next: any) => {
@@ -93,6 +95,24 @@ export function actuatorMiddleware(options: ActuatorOptions = {}): ActuatorMiddl
       if (enabled.prometheus && subPath === '/prometheus' && method === 'GET') {
         res.set('Content-Type', 'text/plain; charset=utf-8');
         return res.send(await actuator.getPrometheus());
+      }
+
+      if (enabled.info && subPath === '/info' && method === 'GET') {
+        return res.json(await actuator.getInfoAsync());
+      }
+
+      if (enabled.metrics && subPath === '/metrics' && method === 'GET') {
+        return res.json(actuator.getMetrics());
+      }
+
+      const endpointResult = await actuator.invokeEndpoint(subPath, {
+        method,
+        path: subPath,
+        query,
+        raw: req,
+      });
+      if (endpointResult !== null) {
+        return res.json(endpointResult);
       }
 
       // Unknown actuator sub-path
