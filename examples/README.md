@@ -28,3 +28,15 @@ curl -H "Authorization: Bearer dev-token" http://localhost:3000/actuator/health
 ## Kubernetes
 
 `kubernetes/deployment.yaml` shows liveness and readiness probes against a dedicated actuator port.
+
+## Ecosystem
+
+`ecosystem/` shows `node-actuator-lite` wired together with `node-eventloop-watchdog` and `node-request-trace` to provide health, metrics, request timelines, and event-loop protection from a single Express app.
+
+```bash
+cd examples/ecosystem
+npm install
+ACTUATOR_TOKEN=dev-token npm start
+curl -H "Authorization: Bearer dev-token" http://localhost:3000/actuator
+open http://localhost:3000/trace/ui
+```
