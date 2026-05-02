@@ -49,6 +49,21 @@ For Express/Fastify, mount the actuator middleware behind your existing auth or 
 - **Dual mode** — standalone HTTP server *or* serverless (direct method calls, no port needed)
 - **Single runtime dependency** — `prom-client`
 
+## Ecosystem
+
+`node-actuator-lite` is part of a small Node.js observability ecosystem you can adopt independently or together:
+
+- **`node-actuator-lite`** — Spring Boot-style `/actuator/health`, `/info`, `/metrics`, `/env`, `/threaddump`, `/heapdump`, and `/prometheus` endpoints.
+- [`node-eventloop-watchdog`](https://github.com/beingmartinbmc/node-eventloop-watchdog) — Detects event-loop stalls, captures stack traces and hotspots, and triggers recovery.
+- [`node-request-trace`](https://github.com/beingmartinbmc/node-request-trace) — Per-request timelines, browser dashboard, and CLI without OpenTelemetry.
+
+When all three are installed:
+
+- `node-eventloop-watchdog` automatically registers `/actuator/eventloop`, `/actuator/eventloop/history`, `/actuator/eventloop/hotspots`, and `/actuator/eventloop/metrics` under this actuator.
+- Event-loop block events include the active request id, route, and method captured by `node-request-trace`.
+
+Runnable example: [`examples/ecosystem`](./examples/ecosystem).
+
 ## Installation
 
 ```bash
