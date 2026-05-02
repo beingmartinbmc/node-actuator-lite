@@ -93,4 +93,33 @@ export async function actuatorPlugin(
   if (enabled.metrics) {
     fastify.get(`${basePath}/metrics`, async () => actuator.getMetrics());
   }
+
+  // Custom endpoints — including any registered globally via
+  // `registerEndpoint(...)` before the plugin was registered (e.g. by
+  // `node-eventloop-watchdog` when both packages are wired together).
+  // Each is mounted as a Fastify route under `${basePath}/${id}` so the
+  // discovery output, the request router, and the actuator's
+  // `invokeEndpoint` lookup all stay in sync.
+  for (const endpoint of (actuator as any).customEndpoints.values()) {
+    const method: 'GET' | 'POST' = (endpoint.method ?? 'GET') as 'GET' | 'POST';
+    const route = `${basePath}/${endpoint.id}`;
+    const handler = async (req: any, reply: any) => {
+      const result = await endpoint.handler({
+        method,
+        path: `/${endpoint.id}`,
+        query: req.query || {},
+        raw: req.raw || req,
+      });
+      if (endpoint.contentType === 'text') {
+        reply.type('text/plain; charset=utf-8').send(String(result));
+        return;
+      }
+      reply.send(result);
+    };
+    if (method === 'POST') {
+      fastify.post(route, handler);
+    } else {
+      fastify.get(route, handler);
+    }
+  }
 }
