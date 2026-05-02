@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## Unreleased
 
+## 3.2.0 - 2026-05-02
+
+### Added
+
+- `/actuator/info` and `/actuator/metrics` endpoints with programmatic equivalents (`getInfo`, `getInfoAsync`, `getMetrics`).
+- Custom endpoint registration via `endpoints` option, instance `registerEndpoint`, and package-level `registerEndpoint` for ecosystem integrations.
+- Express and Fastify middleware now serve info, metrics, and registered custom endpoints.
+
 ## 3.1.1 - 2026-04-27
 
 ### Added
