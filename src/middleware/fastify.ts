@@ -28,6 +28,8 @@ export async function actuatorPlugin(
     threadDump: opts.threadDump?.enabled ?? true,
     heapDump: opts.heapDump?.enabled ?? true,
     prometheus: opts.prometheus?.enabled ?? true,
+    info: opts.info?.enabled ?? true,
+    metrics: opts.metrics?.enabled ?? true,
   };
 
   // Decorate fastify instance so users can access the actuator
@@ -82,5 +84,13 @@ export async function actuatorPlugin(
     fastify.get(`${basePath}/prometheus`, async (_req: any, reply: any) => {
       reply.type('text/plain; charset=utf-8').send(await actuator.getPrometheus());
     });
+  }
+
+  if (enabled.info) {
+    fastify.get(`${basePath}/info`, async () => actuator.getInfoAsync());
+  }
+
+  if (enabled.metrics) {
+    fastify.get(`${basePath}/metrics`, async () => actuator.getMetrics());
   }
 }

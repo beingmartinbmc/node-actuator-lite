@@ -134,6 +134,23 @@ describe('NodeActuator — discovery', () => {
     expect(d._links['health-liveness']).toBeDefined();
     expect(d._links['health-readiness']).toBeDefined();
   });
+
+  test('discovery includes info, metrics, and registered custom endpoints', async () => {
+    actuator = new NodeActuator({
+      serverless: true,
+      prometheus: { defaultMetrics: false },
+      endpoints: [
+        { id: 'dependencies', handler: () => ({ redis: 'UP' }) },
+      ],
+    });
+    await actuator.start();
+
+    const d = actuator.discovery();
+
+    expect(d._links['info']!.href).toBe('/actuator/info');
+    expect(d._links['metrics']!.href).toBe('/actuator/metrics');
+    expect(d._links['dependencies']!.href).toBe('/actuator/dependencies');
+  });
 });
 
 // =============================================================================
@@ -264,9 +281,36 @@ describe('NodeActuator — programmatic API', () => {
 
   // -- Prometheus --
 
-  test('getPrometheus() returns string', async () => {
+  test('getPrometheus() returns exposition text', async () => {
     const text = await actuator.getPrometheus();
     expect(typeof text).toBe('string');
+  });
+
+  test('getInfo() returns package and runtime information', () => {
+    const info = actuator.getInfo();
+
+    expect(info.runtime.nodeVersion).toBe(process.version);
+    expect(info.runtime.pid).toBe(process.pid);
+    expect(info.build).toBeDefined();
+  });
+
+  test('getMetrics() returns process metrics', () => {
+    const metrics = actuator.getMetrics();
+
+    expect(metrics.process.uptime).toBeGreaterThanOrEqual(0);
+    expect(metrics.process.memory.heapUsed).toBeGreaterThan(0);
+    expect(metrics.process.cpu).toBeDefined();
+  });
+
+  test('registerEndpoint() exposes custom endpoint programmatically', async () => {
+    actuator.registerEndpoint({
+      id: 'dependencies',
+      handler: () => ({ postgres: 'UP' }),
+    });
+
+    const result = await actuator.invokeEndpoint('/dependencies');
+
+    expect(result).toEqual({ postgres: 'UP' });
   });
 
   test('custom metric accessible and functional', async () => {
@@ -416,6 +460,32 @@ describe('NodeActuator — standalone HTTP', () => {
     const res = await fetch(`${baseUrl}/prometheus`);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/plain');
+  });
+
+  test('GET /info returns info JSON', async () => {
+    const res = await fetch(`${baseUrl}/info`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.runtime.nodeVersion).toBe(process.version);
+  });
+
+  test('GET /metrics returns process metrics JSON', async () => {
+    const res = await fetch(`${baseUrl}/metrics`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.process.memory.heapUsed).toBeGreaterThan(0);
+  });
+
+  test('GET registered custom endpoint returns JSON', async () => {
+    actuator.registerEndpoint({
+      id: 'dependencies',
+      handler: () => ({ redis: 'UP' }),
+    });
+
+    const res = await fetch(`${baseUrl}/dependencies`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.redis).toBe('UP');
   });
 
   // -- 404 for unknown paths --

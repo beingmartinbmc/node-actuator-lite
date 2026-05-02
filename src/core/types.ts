@@ -11,11 +11,14 @@ export interface ActuatorOptions {
   basePath?: string;
   serverless?: boolean;
 
+  info?: InfoConfig;
+  metrics?: MetricsConfig;
   health?: HealthConfig;
   env?: EnvConfig;
   threadDump?: { enabled?: boolean };
   heapDump?: HeapDumpConfig;
   prometheus?: PrometheusConfig;
+  endpoints?: CustomEndpointRegistration[];
 }
 
 export interface HealthConfig {
@@ -63,6 +66,34 @@ export interface CustomMetricDefinition {
   type: 'counter' | 'gauge' | 'histogram' | 'summary';
   labels?: string[];
   buckets?: number[];
+}
+
+export interface InfoConfig {
+  enabled?: boolean;
+  build?: Record<string, any>;
+  contributors?: Array<{
+    name: string;
+    collect: () => Record<string, any> | Promise<Record<string, any>>;
+  }>;
+}
+
+export interface MetricsConfig {
+  enabled?: boolean;
+}
+
+export interface CustomEndpointRegistration {
+  id: string;
+  method?: 'GET' | 'POST';
+  handler: (context?: CustomEndpointContext) => any | Promise<any>;
+  contentType?: 'json' | 'text';
+}
+
+export interface CustomEndpointContext {
+  method?: string;
+  path?: string;
+  params?: Record<string, string>;
+  query?: Record<string, string>;
+  raw?: any;
 }
 
 // ============================================================================
@@ -132,6 +163,27 @@ export interface HeapDumpResponse {
   memoryAfter: NodeJS.MemoryUsage;
 }
 
+export interface InfoResponse {
+  build?: Record<string, any>;
+  runtime: {
+    nodeVersion: string;
+    platform: string;
+    arch: string;
+    pid: number;
+    cwd: string;
+    uptime: number;
+  };
+  contributors?: Record<string, any>;
+}
+
+export interface MetricsResponse {
+  process: {
+    uptime: number;
+    memory: NodeJS.MemoryUsage;
+    cpu: NodeJS.CpuUsage;
+  };
+}
+
 export interface DiscoveryLink {
   href: string;
   templated?: boolean;
@@ -149,6 +201,19 @@ export interface ResolvedActuatorOptions {
   port: number;
   basePath: string;
   serverless: boolean;
+
+  info: {
+    enabled: boolean;
+    build: Record<string, any> | undefined;
+    contributors: Array<{
+      name: string;
+      collect: () => Record<string, any> | Promise<Record<string, any>>;
+    }>;
+  };
+
+  metrics: {
+    enabled: boolean;
+  };
 
   health: Required<Pick<HealthConfig, 'enabled' | 'showDetails' | 'timeout'>> & {
     indicators: {
@@ -181,4 +246,6 @@ export interface ResolvedActuatorOptions {
     prefix: string;
     customMetrics: CustomMetricDefinition[];
   };
+
+  endpoints: CustomEndpointRegistration[];
 }

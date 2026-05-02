@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger';
 import { ActuatorServer } from './Server';
+import type { ParsedRequest, WrappedResponse } from './Server';
 import { HealthCollector } from '../collectors/HealthCollector';
 import { EnvironmentCollector, DEFAULT_MASK_PATTERNS } from '../collectors/EnvironmentCollector';
 import { PrometheusCollector } from '../collectors/PrometheusCollector';
@@ -14,11 +15,18 @@ import type {
   EnvResponse,
   ThreadDumpResponse,
   HeapDumpResponse,
+  InfoResponse,
+  MetricsResponse,
+  CustomEndpointRegistration,
+  CustomEndpointContext,
 } from './types';
 
 export class NodeActuator {
+  private static globalEndpoints: Map<string, CustomEndpointRegistration> = new Map();
+  private static instances: Set<NodeActuator> = new Set();
   private opts: ResolvedActuatorOptions;
   private server?: ActuatorServer;
+  private customEndpoints: Map<string, CustomEndpointRegistration> = new Map();
 
   // Collectors — exposed as readonly for advanced usage
   readonly health: HealthCollector;
@@ -47,6 +55,13 @@ export class NodeActuator {
     this.prometheus = new PrometheusCollector(this.opts.prometheus);
     this.threadDump = new ThreadDumpCollector();
     this.heapDump = new HeapDumpCollector(this.opts.heapDump);
+    NodeActuator.instances.add(this);
+    for (const endpoint of NodeActuator.globalEndpoints.values()) {
+      this.registerEndpoint(endpoint);
+    }
+    for (const endpoint of this.opts.endpoints) {
+      this.registerEndpoint(endpoint);
+    }
 
     // Initialise HTTP server (unless serverless)
     if (!this.opts.serverless) {
@@ -71,6 +86,7 @@ export class NodeActuator {
 
   async stop(): Promise<void> {
     if (this.server) await this.server.stop();
+    NodeActuator.instances.delete(this);
   }
 
   getPort(): number {
@@ -111,6 +127,17 @@ export class NodeActuator {
     if (this.opts.prometheus.enabled) {
       links['prometheus'] = { href: `${base}/prometheus` };
     }
+    if (this.opts.info.enabled) {
+      links['info'] = { href: `${base}/info` };
+    }
+    if (this.opts.metrics.enabled) {
+      links['metrics'] = { href: `${base}/metrics` };
+    }
+    for (const endpoint of this.customEndpoints.values()) {
+      links[this.normalizeEndpointId(endpoint.id)] = {
+        href: `${base}/${this.normalizeEndpointId(endpoint.id)}`,
+      };
+    }
 
     return { _links: links };
   }
@@ -145,6 +172,76 @@ export class NodeActuator {
 
   async getPrometheus(): Promise<string> {
     return this.prometheus.collect();
+  }
+
+  getInfo(): InfoResponse {
+    const response: InfoResponse = {
+      runtime: {
+        nodeVersion: process.version,
+        platform: process.platform,
+        arch: process.arch,
+        pid: process.pid,
+        cwd: process.cwd(),
+        uptime: process.uptime(),
+      },
+    };
+
+    const build = this.opts.info.build ?? this.getPackageBuildInfo();
+    if (build) response.build = build;
+    return response;
+  }
+
+  async getInfoAsync(): Promise<InfoResponse> {
+    const response = this.getInfo();
+    const contributors: Record<string, any> = {};
+
+    for (const contributor of this.opts.info.contributors) {
+      contributors[contributor.name] = await contributor.collect();
+    }
+
+    if (Object.keys(contributors).length > 0) {
+      response.contributors = contributors;
+    }
+
+    return response;
+  }
+
+  getMetrics(): MetricsResponse {
+    return {
+      process: {
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        cpu: process.cpuUsage(),
+      },
+    };
+  }
+
+  registerEndpoint(endpoint: CustomEndpointRegistration): void {
+    const normalized = this.normalizeEndpointId(endpoint.id);
+    const registered = { ...endpoint, id: normalized, method: endpoint.method ?? 'GET' };
+    this.customEndpoints.set(this.endpointKey(registered.method, normalized), registered);
+
+    if (this.server) {
+      this.registerCustomEndpointRoute(registered);
+    }
+  }
+
+  async invokeEndpoint(path: string, context: CustomEndpointContext = {}): Promise<any> {
+    const id = this.normalizeEndpointId(path);
+    const method = (context.method ?? 'GET').toUpperCase() as 'GET' | 'POST';
+    const endpoint = this.customEndpoints.get(this.endpointKey(method, id));
+    if (!endpoint) return null;
+    return endpoint.handler({ ...context, method, path: `/${id}` });
+  }
+
+  static registerGlobalEndpoint(endpoint: CustomEndpointRegistration): void {
+    const normalized = NodeActuator.normalizeEndpointId(endpoint.id);
+    const registered = { ...endpoint, id: normalized, method: endpoint.method ?? 'GET' };
+    NodeActuator.globalEndpoints.set(NodeActuator.endpointKey(registered.method, normalized), registered);
+
+    for (const instance of NodeActuator.instances) {
+      instance.registerEndpoint(registered);
+    }
   }
 
   // ===========================================================================
@@ -227,6 +324,52 @@ export class NodeActuator {
         res.text(text);
       });
     }
+
+    if (this.opts.info.enabled) {
+      srv.get('/info', async (_req, res) => {
+        res.json(await this.getInfoAsync());
+      });
+    }
+
+    if (this.opts.metrics.enabled) {
+      srv.get('/metrics', (_req, res) => {
+        res.json(this.getMetrics());
+      });
+    }
+
+    for (const endpoint of this.customEndpoints.values()) {
+      this.registerCustomEndpointRoute(endpoint);
+    }
+  }
+
+  private registerCustomEndpointRoute(endpoint: CustomEndpointRegistration): void {
+    const method = endpoint.method ?? 'GET';
+    this.server!.route(method, `/${this.normalizeEndpointId(endpoint.id)}`, async (req, res) => {
+      const result = await endpoint.handler(this.toEndpointContext(req));
+      this.sendCustomEndpointResponse(endpoint, result, res);
+    });
+  }
+
+  private toEndpointContext(req: ParsedRequest): CustomEndpointContext {
+    return {
+      method: req.method,
+      path: req.path,
+      params: req.params,
+      query: req.query,
+      raw: req.raw,
+    };
+  }
+
+  private sendCustomEndpointResponse(
+    endpoint: CustomEndpointRegistration,
+    result: any,
+    res: WrappedResponse,
+  ): void {
+    if (endpoint.contentType === 'text') {
+      res.text(String(result));
+      return;
+    }
+    res.json(result);
   }
 
   // ===========================================================================
@@ -238,6 +381,16 @@ export class NodeActuator {
       port: o.port ?? 0,
       basePath: o.basePath ?? '/actuator',
       serverless: o.serverless ?? false,
+
+      info: {
+        enabled: o.info?.enabled ?? true,
+        build: o.info?.build,
+        contributors: o.info?.contributors ?? [],
+      },
+
+      metrics: {
+        enabled: o.metrics?.enabled ?? true,
+      },
 
       health: {
         enabled: o.health?.enabled ?? true,
@@ -282,6 +435,37 @@ export class NodeActuator {
         prefix: o.prometheus?.prefix ?? '',
         customMetrics: o.prometheus?.customMetrics ?? [],
       },
+
+      endpoints: o.endpoints ?? [],
     };
+  }
+
+  private endpointKey(method: string | undefined, id: string): string {
+    return NodeActuator.endpointKey(method, id);
+  }
+
+  private normalizeEndpointId(id: string): string {
+    return NodeActuator.normalizeEndpointId(id);
+  }
+
+  private static endpointKey(method: string | undefined, id: string): string {
+    return `${(method ?? 'GET').toUpperCase()} ${NodeActuator.normalizeEndpointId(id)}`;
+  }
+
+  private static normalizeEndpointId(id: string): string {
+    return id.replace(/^\/+/, '').replace(/\/+$/, '');
+  }
+
+  private getPackageBuildInfo(): Record<string, any> | undefined {
+    try {
+      const pkg = require(`${process.cwd()}/package.json`);
+      return {
+        name: pkg.name,
+        description: pkg.description,
+        version: pkg.version,
+      };
+    } catch {
+      return undefined;
+    }
   }
 }
