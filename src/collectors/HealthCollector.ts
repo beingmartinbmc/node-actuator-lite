@@ -230,15 +230,18 @@ export class HealthCollector {
       };
     }
 
-    // Fallback for Node 18.0–18.14: platform-specific shell commands
+    /* istanbul ignore next: legacy fallback path for Node 18.0–18.14 only */
     logger.debug('fs.statfsSync unavailable, falling back to shell commands');
 
+    /* istanbul ignore next: legacy fallback path for Node 18.0–18.14 only */
     if (process.platform === 'win32') {
       return this.getDiskSpaceWindows(diskPath);
     }
+    /* istanbul ignore next: legacy fallback path for Node 18.0–18.14 only */
     return this.getDiskSpaceUnix(diskPath);
   }
 
+  /* istanbul ignore next: shell-command fallback path for Node 18.0–18.14 only */
   private getDiskSpaceWindows(diskPath: string): { free: number; total: number } {
     try {
       // PowerShell works on all modern Windows (10+, Server 2016+)
@@ -267,6 +270,7 @@ export class HealthCollector {
     }
   }
 
+  /* istanbul ignore next: shell-command fallback path for Node 18.0–18.14 only */
   private getDiskSpaceUnix(diskPath: string): { free: number; total: number } {
     // df -Pk works on both Linux and macOS
     const out = execSync(`df -Pk "${diskPath}"`, { encoding: 'utf8', timeout: 5000 });

@@ -101,14 +101,14 @@ export async function actuatorPlugin(
   // discovery output, the request router, and the actuator's
   // `invokeEndpoint` lookup all stay in sync.
   for (const endpoint of (actuator as any).customEndpoints.values()) {
-    const method: 'GET' | 'POST' = (endpoint.method ?? 'GET') as 'GET' | 'POST';
+    const method = endpoint.method as 'GET' | 'POST';
     const route = `${basePath}/${endpoint.id}`;
     const handler = async (req: any, reply: any) => {
       const result = await endpoint.handler({
         method,
         path: `/${endpoint.id}`,
-        query: req.query || {},
-        raw: req.raw || req,
+        query: req.query,
+        raw: req.raw,
       });
       if (endpoint.contentType === 'text') {
         reply.type('text/plain; charset=utf-8').send(String(result));

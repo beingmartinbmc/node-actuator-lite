@@ -11,6 +11,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
+    "test:coverage:check": "jest --coverage",
     "typecheck": "tsc --noEmit",
     "test:package": "node tests/package-smoke.cjs",
     "audit:prod": "npm audit --omit=dev",
