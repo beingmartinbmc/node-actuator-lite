@@ -106,4 +106,4 @@ heapdumps/
 *.heapsnapshot.gz
 
 # Test output files
-test-output.txt 
+test-output.txt .cursor/

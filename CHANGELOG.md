@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## Unreleased
 
+## 3.2.1 - 2026-05-02
+
+### Fixed
+
+- Fastify plugin now mounts every registered custom endpoint (including those registered globally via `registerEndpoint(...)` by ecosystem packages such as `node-eventloop-watchdog`) as a Fastify route under `${basePath}/${id}`. Previously, only the built-in routes (`/health`, `/info`, `/metrics`, `/env`, `/threaddump`, `/heapdump`, `/prometheus`) were registered, so ecosystem-extension endpoints (e.g. `/actuator/eventloop`) were unreachable through the Fastify plugin even though discovery and `invokeEndpoint` knew about them.
+- The `contentType: 'text'` flag is honoured in the Fastify plugin and emits `text/plain; charset=utf-8`, matching the Express middleware behaviour.
+
 ## 3.2.0 - 2026-05-02
 
 ### Added
