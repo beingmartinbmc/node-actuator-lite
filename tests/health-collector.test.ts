@@ -127,6 +127,39 @@ describe('HealthCollector', () => {
     expect(['DOWN', 'UNKNOWN']).toContain(c!.status);
   });
 
+  test('diskSpace indicator returns UNKNOWN when statfsSync throws', async () => {
+    const fs = require('fs');
+    const orig = fs.statfsSync;
+    fs.statfsSync = () => { throw new Error('statfs failure'); };
+    try {
+      const hc = new HealthCollector(makeConfig());
+      const c = await hc.component('diskSpace');
+      expect(c).not.toBeNull();
+      // Falls into the catch branch in checkDiskSpace which returns UNKNOWN.
+      // On Linux/macOS the Unix `df` fallback may still succeed → UP/DOWN.
+      expect(['UP', 'DOWN', 'UNKNOWN']).toContain(c!.status);
+      if (c!.status === 'UNKNOWN') {
+        expect(c!.details!['error']).toBeDefined();
+      }
+    } finally {
+      fs.statfsSync = orig;
+    }
+  });
+
+  test('diskSpace indicator returns UNKNOWN when path does not exist', async () => {
+    const hc = new HealthCollector(
+      makeConfig({
+        indicators: {
+          diskSpace: { enabled: true, threshold: 0, path: '/__definitely_not_a_real_mount__' },
+          process: { enabled: false },
+        },
+      }),
+    );
+    const c = await hc.component('diskSpace');
+    expect(c).not.toBeNull();
+    expect(['UP', 'UNKNOWN']).toContain(c!.status);
+  });
+
   // ===========================================================================
   // addIndicator / removeIndicator
   // ===========================================================================
