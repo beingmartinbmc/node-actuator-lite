@@ -313,6 +313,62 @@ describe('actuatorPlugin', () => {
   });
 });
 
+describe('actuatorPlugin custom endpoints', () => {
+  function createCapturingFastify() {
+    const handlers: Record<string, Function> = {};
+    const fastify: any = {
+      hasDecorator: jest.fn(() => false),
+      decorate: jest.fn(),
+      get: jest.fn((path: string, handler: Function) => {
+        handlers[`GET ${path}`] = handler;
+      }),
+      post: jest.fn((path: string, handler: Function) => {
+        handlers[`POST ${path}`] = handler;
+      }),
+    };
+    return { fastify, handlers };
+  }
+
+  test('mounts ecosystem-registered custom endpoints as Fastify routes', async () => {
+    // Simulate a downstream package (e.g. node-eventloop-watchdog) registering
+    // an endpoint globally before the Fastify plugin is registered.
+    registerEndpoint({
+      id: 'eventloop',
+      handler: () => ({ status: 'ok', avgLag: 0 }),
+    });
+
+    const { fastify, handlers } = createCapturingFastify();
+    await actuatorPlugin(fastify, { prometheus: { defaultMetrics: false } });
+
+    const handler = handlers['GET /actuator/eventloop'];
+    expect(typeof handler).toBe('function');
+
+    const reply = createFastifyReply();
+    await handler!({ query: {}, raw: {} }, reply);
+    expect(reply.body).toEqual({ status: 'ok', avgLag: 0 });
+  });
+
+  test('respects POST method and contentType when registering Fastify routes', async () => {
+    registerEndpoint({
+      id: 'custom-post',
+      method: 'POST',
+      handler: () => 'plain-text',
+      contentType: 'text',
+    });
+
+    const { fastify, handlers } = createCapturingFastify();
+    await actuatorPlugin(fastify, { prometheus: { defaultMetrics: false } });
+
+    const handler = handlers['POST /actuator/custom-post'];
+    expect(typeof handler).toBe('function');
+
+    const reply = createFastifyReply();
+    await handler!({ query: {}, raw: {} }, reply);
+    expect(reply.contentType).toContain('text/plain');
+    expect(reply.body).toBe('plain-text');
+  });
+});
+
 describe('root endpoint registry', () => {
   test('registerEndpoint object and invokeEndpoint expose default registry', async () => {
     registerEndpoint({
