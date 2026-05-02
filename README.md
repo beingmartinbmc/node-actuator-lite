@@ -64,6 +64,16 @@ When all three are installed:
 
 Runnable example: [`examples/ecosystem`](./examples/ecosystem).
 
+> **Quickest setup:** Use [`node-observability-lite`](https://github.com/beingmartinbmc/node-observability-lite) to wire the three packages together with production-safe presets in one line.
+>
+> ```js
+> const observability = require('node-observability-lite');
+> observability.express(app, {
+>   preset: 'production',
+>   auth: req => req.get('authorization') === `Bearer ${process.env.OPS_TOKEN}`,
+> });
+> ```
+
 ## Installation
 
 ```bash
