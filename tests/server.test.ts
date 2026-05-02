@@ -217,4 +217,26 @@ describe('ActuatorServer', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ root: true });
   });
+
+  test('returns 404 when request path is outside basePath', async () => {
+    baseUrl = await startServer('/actuator');
+    server.get('/health', (_req, res) => res.json({ ok: true }));
+
+    const res = await fetch(`http://localhost:${server.getPort()}/not-actuator/health`);
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as any;
+    expect(body.error).toBe('Not Found');
+    expect(body.message).toContain('GET /not-actuator/health');
+  });
+
+  test('post() helper registers a POST route', async () => {
+    baseUrl = await startServer('/actuator');
+    server.post('/echo', (req, res) => {
+      res.status(201).json({ method: req.method, path: req.path });
+    });
+
+    const res = await fetch(`${baseUrl}/echo`, { method: 'POST' });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ method: 'POST', path: '/echo' });
+  });
 });

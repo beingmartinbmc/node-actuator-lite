@@ -73,6 +73,7 @@ export class ThreadDumpCollector {
   }
 
   private getWorkerThreads(): Array<{ threadId: number; name: string; state: string }> {
+    /* istanbul ignore next: try/catch and the worker-thread branch are only reachable when worker_threads is missing or this collector itself runs inside a worker thread */
     try {
       const wt = require('worker_threads');
       if (wt.isMainThread) return [];
