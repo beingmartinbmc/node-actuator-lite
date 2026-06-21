@@ -1,11 +1,23 @@
 import { logger } from '../utils/logger';
 import { ActuatorServer } from './Server';
 import type { ParsedRequest, WrappedResponse } from './Server';
+import {
+  runEndpoint,
+  healthStatusCode,
+  json,
+  text,
+  html,
+  compilePath,
+  type EndpointDescriptor,
+  type ActuatorRequestContext,
+  type ActuatorRouteResult,
+} from './router';
 import { HealthCollector } from '../collectors/HealthCollector';
 import { EnvironmentCollector, DEFAULT_MASK_PATTERNS } from '../collectors/EnvironmentCollector';
 import { PrometheusCollector } from '../collectors/PrometheusCollector';
 import { ThreadDumpCollector } from '../collectors/ThreadDumpCollector';
-import { HeapDumpCollector } from '../collectors/HeapDumpCollector';
+import { HeapDumpCollector, HeapDumpThrottledError } from '../collectors/HeapDumpCollector';
+import { renderDashboard } from './dashboard';
 import type {
   ActuatorOptions,
   ResolvedActuatorOptions,
@@ -37,6 +49,11 @@ export class NodeActuator {
 
   constructor(options: ActuatorOptions = {}) {
     this.opts = this.resolve(options);
+
+    // Wire a custom logger if provided.
+    if (options.logger) {
+      logger.setDelegate(options.logger);
+    }
 
     // Warn if running in a serverless env without serverless flag
     if (!this.opts.serverless) {
@@ -133,6 +150,9 @@ export class NodeActuator {
     if (this.opts.metrics.enabled) {
       links['metrics'] = { href: `${base}/metrics` };
     }
+    if (this.opts.dashboard.enabled) {
+      links['dashboard'] = { href: `${base}/dashboard` };
+    }
     for (const endpoint of this.customEndpoints.values()) {
       links[this.normalizeEndpointId(endpoint.id)] = {
         href: `${base}/${this.normalizeEndpointId(endpoint.id)}`,
@@ -222,7 +242,7 @@ export class NodeActuator {
     this.customEndpoints.set(this.endpointKey(registered.method, normalized), registered);
 
     if (this.server) {
-      this.registerCustomEndpointRoute(registered);
+      this.registerDescriptorRoute(this.toDescriptor(registered));
     }
   }
 
@@ -245,131 +265,199 @@ export class NodeActuator {
   }
 
   // ===========================================================================
-  // Route Registration
+  // Shared Endpoint Table
   // ===========================================================================
 
-  private registerRoutes(): void {
-    const srv = this.server!;
+  /**
+   * The single source of truth for every actuator endpoint. The standalone
+   * HTTP server, the Express middleware, and the Fastify plugin all consume
+   * this list so status codes, content types, and auth never diverge.
+   */
+  listEndpoints(): EndpointDescriptor[] {
+    return [...this.buildBuiltinEndpoints(), ...this.customEndpointDescriptors()];
+  }
 
-    // Discovery
-    srv.get('/', (_req, res) => {
-      res.json(this.discovery());
-    });
+  /**
+   * Run a specific descriptor with a request context (auth included). Used by
+   * transports that have already matched the route and parsed path params
+   * themselves (e.g. the Fastify plugin), so we don't re-run the matcher.
+   */
+  async runDescriptor(
+    descriptor: EndpointDescriptor,
+    ctx: ActuatorRequestContext,
+  ): Promise<ActuatorRouteResult> {
+    return runEndpoint(descriptor, ctx, this.opts.auth);
+  }
 
-    // Health
+  /**
+   * Match a normalised request against the endpoint table and run it (with auth).
+   * Returns `null` when no endpoint matches (caller decides 404 / passthrough).
+   */
+  async dispatch(ctx: ActuatorRequestContext): Promise<ActuatorRouteResult | null> {
+    const subPath = ctx.subPath === '' ? '/' : ctx.subPath;
+    for (const descriptor of this.listEndpoints()) {
+      if (descriptor.method !== ctx.method) continue;
+      const { regex, paramNames } = compilePath(descriptor.path);
+      const match = subPath.match(regex);
+      if (!match) continue;
+      const params: Record<string, string> = {};
+      paramNames.forEach((name, i) => {
+        params[name] = decodeURIComponent(match[i + 1]!);
+      });
+      return runEndpoint(descriptor, { ...ctx, subPath, params }, this.opts.auth);
+    }
+    return null;
+  }
+
+  private buildBuiltinEndpoints(): EndpointDescriptor[] {
+    const endpoints: EndpointDescriptor[] = [];
+
+    endpoints.push({ method: 'GET', path: '/', handle: () => json(this.discovery()) });
+
+    if (this.opts.dashboard.enabled) {
+      endpoints.push({
+        method: 'GET',
+        path: '/dashboard',
+        handle: () => html(renderDashboard(this.opts.basePath)),
+      });
+    }
+
     if (this.opts.health.enabled) {
-      srv.get('/health', async (req, res) => {
-        const result = await this.health.collect(req.query['showDetails']);
-        const code = result.status === 'UP' ? 200 : 503;
-        res.status(code).json(result);
+      endpoints.push({
+        method: 'GET',
+        path: '/health',
+        handle: async (ctx) => {
+          const result = await this.health.collect(ctx.query['showDetails']);
+          return json(result, healthStatusCode(result.status));
+        },
       });
-
-      srv.get('/health/:component', async (req, res) => {
-        const name = req.params['component']!;
-
-        // Check if it's a group first
-        const groupResult = await this.health.group(name);
-        if (groupResult) {
-          const code = groupResult.status === 'UP' ? 200 : 503;
-          res.status(code).json(groupResult);
-          return;
-        }
-
-        // Then individual component
-        const comp = await this.health.component(name);
-        if (!comp) {
-          res.status(404).json({ error: `Health component '${name}' not found` });
-          return;
-        }
-        const code = comp.status === 'UP' ? 200 : 503;
-        res.status(code).json(comp);
+      endpoints.push({
+        method: 'GET',
+        path: '/health/:name',
+        handle: async (ctx) => {
+          const name = ctx.params['name']!;
+          const group = await this.health.group(name);
+          if (group) return json(group, healthStatusCode(group.status));
+          const comp = await this.health.component(name);
+          if (!comp) return json({ error: `Health component '${name}' not found` }, 404);
+          return json(comp, healthStatusCode(comp.status));
+        },
       });
     }
 
-    // Environment
     if (this.opts.env.enabled) {
-      srv.get('/env', (_req, res) => {
-        res.json(this.env.collect());
-      });
-
-      srv.get('/env/:name', (req, res) => {
-        const result = this.env.variable(req.params['name']!);
-        if (!result) {
-          res.status(404).json({ error: `Variable '${req.params['name']}' not found` });
-          return;
-        }
-        res.json(result);
+      endpoints.push({ method: 'GET', path: '/env', handle: () => json(this.env.collect()) });
+      endpoints.push({
+        method: 'GET',
+        path: '/env/:name',
+        handle: (ctx) => {
+          const name = ctx.params['name']!;
+          const result = this.env.variable(name);
+          return result ? json(result) : json({ error: `Variable '${name}' not found` }, 404);
+        },
       });
     }
 
-    // Thread dump
     if (this.opts.threadDump.enabled) {
-      srv.get('/threaddump', (_req, res) => {
-        res.json(this.threadDump.collect());
-      });
+      endpoints.push({ method: 'GET', path: '/threaddump', handle: () => json(this.threadDump.collect()) });
     }
 
-    // Heap dump (POST — it's a heavy side-effect operation)
     if (this.opts.heapDump.enabled) {
-      srv.post('/heapdump', async (_req, res) => {
-        const result = await this.heapDump.collect();
-        res.json(result);
+      endpoints.push({
+        method: 'POST',
+        path: '/heapdump',
+        handle: async () => {
+          try {
+            return json(await this.heapDump.collect());
+          } catch (err) {
+            if (err instanceof HeapDumpThrottledError) {
+              return json({ error: err.message }, 429);
+            }
+            throw err;
+          }
+        },
       });
     }
 
-    // Prometheus
     if (this.opts.prometheus.enabled) {
-      srv.get('/prometheus', async (_req, res) => {
-        const text = await this.prometheus.collect();
-        res.text(text);
+      endpoints.push({
+        method: 'GET',
+        path: '/prometheus',
+        handle: async () => text(await this.prometheus.collect()),
       });
     }
 
     if (this.opts.info.enabled) {
-      srv.get('/info', async (_req, res) => {
-        res.json(await this.getInfoAsync());
-      });
+      endpoints.push({ method: 'GET', path: '/info', handle: async () => json(await this.getInfoAsync()) });
     }
 
     if (this.opts.metrics.enabled) {
-      srv.get('/metrics', (_req, res) => {
-        res.json(this.getMetrics());
-      });
+      endpoints.push({ method: 'GET', path: '/metrics', handle: () => json(this.getMetrics()) });
     }
 
-    for (const endpoint of this.customEndpoints.values()) {
-      this.registerCustomEndpointRoute(endpoint);
+    return endpoints;
+  }
+
+  private customEndpointDescriptors(): EndpointDescriptor[] {
+    return [...this.customEndpoints.values()].map((e) => this.toDescriptor(e));
+  }
+
+  private toDescriptor(endpoint: CustomEndpointRegistration): EndpointDescriptor {
+    const method = (endpoint.method ?? 'GET') as 'GET' | 'POST';
+    return {
+      method,
+      path: `/${this.normalizeEndpointId(endpoint.id)}`,
+      handle: async (ctx): Promise<ActuatorRouteResult> => {
+        const result = await endpoint.handler({
+          method: ctx.method,
+          path: ctx.subPath,
+          params: ctx.params,
+          query: ctx.query,
+          raw: ctx.raw,
+        });
+        return endpoint.contentType === 'text' ? text(String(result)) : json(result);
+      },
+    };
+  }
+
+  // ===========================================================================
+  // Standalone HTTP Route Registration
+  // ===========================================================================
+
+  private registerRoutes(): void {
+    for (const descriptor of this.listEndpoints()) {
+      this.registerDescriptorRoute(descriptor);
     }
   }
 
-  private registerCustomEndpointRoute(endpoint: CustomEndpointRegistration): void {
-    const method = endpoint.method ?? 'GET';
-    this.server!.route(method, `/${this.normalizeEndpointId(endpoint.id)}`, async (req, res) => {
-      const result = await endpoint.handler(this.toEndpointContext(req));
-      this.sendCustomEndpointResponse(endpoint, result, res);
+  private registerDescriptorRoute(descriptor: EndpointDescriptor): void {
+    this.server!.route(descriptor.method, descriptor.path, async (req, res) => {
+      const result = await runEndpoint(descriptor, this.toRequestContext(req), this.opts.auth);
+      this.sendResult(result, res);
     });
   }
 
-  private toEndpointContext(req: ParsedRequest): CustomEndpointContext {
+  private toRequestContext(req: ParsedRequest): ActuatorRequestContext {
     return {
       method: req.method,
-      path: req.path,
+      subPath: req.path,
       params: req.params,
       query: req.query,
+      body: req.body,
       raw: req.raw,
     };
   }
 
-  private sendCustomEndpointResponse(
-    endpoint: CustomEndpointRegistration,
-    result: any,
-    res: WrappedResponse,
-  ): void {
-    if (endpoint.contentType === 'text') {
-      res.text(String(result));
+  private sendResult(result: ActuatorRouteResult, res: WrappedResponse): void {
+    if (result.contentType === 'text') {
+      res.status(result.status).text(String(result.body));
       return;
     }
-    res.json(result);
+    if (result.contentType === 'html') {
+      res.status(result.status).html(String(result.body));
+      return;
+    }
+    res.status(result.status).json(result.body);
   }
 
   // ===========================================================================
@@ -381,6 +469,7 @@ export class NodeActuator {
       port: o.port ?? 0,
       basePath: o.basePath ?? '/actuator',
       serverless: o.serverless ?? false,
+      auth: o.auth,
 
       info: {
         enabled: o.info?.enabled ?? true,
@@ -417,6 +506,7 @@ export class NodeActuator {
           patterns: o.env?.mask?.patterns ?? [...DEFAULT_MASK_PATTERNS],
           additional: o.env?.mask?.additional ?? [],
           replacement: o.env?.mask?.replacement ?? '******',
+          allowlist: o.env?.mask?.allowlist,
         },
       },
 
@@ -427,6 +517,7 @@ export class NodeActuator {
       heapDump: {
         enabled: o.heapDump?.enabled ?? true,
         outputDir: o.heapDump?.outputDir ?? './heapdumps',
+        minIntervalMs: o.heapDump?.minIntervalMs ?? 60000,
       },
 
       prometheus: {
@@ -434,6 +525,10 @@ export class NodeActuator {
         defaultMetrics: o.prometheus?.defaultMetrics ?? true,
         prefix: o.prometheus?.prefix ?? '',
         customMetrics: o.prometheus?.customMetrics ?? [],
+      },
+
+      dashboard: {
+        enabled: o.dashboard?.enabled ?? true,
       },
 
       endpoints: o.endpoints ?? [],

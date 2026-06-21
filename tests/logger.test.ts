@@ -146,4 +146,54 @@ describe('Logger', () => {
     const parsed = JSON.parse(line.trim());
     expect(parsed.level).toBe(expectedLevel);
   });
+
+  // ===========================================================================
+  // Delegate
+  // ===========================================================================
+
+  describe('delegate', () => {
+    afterEach(() => logger.setDelegate(null));
+
+    test('routes output through the delegate regardless of configured level', () => {
+      const calls: Array<[string, string, unknown]> = [];
+      logger.setLevel('SILENT');
+      logger.setDelegate({
+        trace: (m, d) => calls.push(['trace', m, d]),
+        debug: (m, d) => calls.push(['debug', m, d]),
+        info: (m, d) => calls.push(['info', m, d]),
+        warn: (m, d) => calls.push(['warn', m, d]),
+        error: (m, d) => calls.push(['error', m, d]),
+      });
+
+      logger.info('hi', { a: 1 });
+      logger.error('oops');
+
+      expect(calls).toEqual([
+        ['info', 'hi', { a: 1 }],
+        ['error', 'oops', undefined],
+      ]);
+      // Built-in transport must not be used while delegate is active.
+      expect(stdoutSpy).not.toHaveBeenCalled();
+      expect(stderrSpy).not.toHaveBeenCalled();
+    });
+
+    test('tolerates a delegate that is missing a method', () => {
+      logger.setDelegate({ error: () => undefined } as any);
+      expect(() => logger.info('no info method')).not.toThrow();
+    });
+
+    test('setDelegate(null) restores the built-in transport', () => {
+      logger.setDelegate({
+        trace: () => undefined,
+        debug: () => undefined,
+        info: () => undefined,
+        warn: () => undefined,
+        error: () => undefined,
+      });
+      logger.setDelegate(null);
+      logger.setLevel('INFO');
+      logger.info('back to console');
+      expect(stdoutSpy).toHaveBeenCalledTimes(1);
+    });
+  });
 });

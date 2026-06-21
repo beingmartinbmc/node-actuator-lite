@@ -59,6 +59,16 @@ describe('ActuatorServer', () => {
     expect(await res.text()).toBe('hello world');
   });
 
+  test('html() response sets correct content-type', async () => {
+    baseUrl = await startServer();
+    server.get('/page', (_req, res) => {
+      res.html('<!doctype html><title>hi</title>');
+    });
+    const res = await fetch(`${baseUrl}/page`);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    expect(await res.text()).toContain('<title>hi</title>');
+  });
+
   test('status() is chainable', async () => {
     baseUrl = await startServer();
     server.get('/chain', (_req, res) => {

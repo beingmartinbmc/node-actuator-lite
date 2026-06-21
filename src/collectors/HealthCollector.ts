@@ -1,5 +1,4 @@
 import fs from 'fs';
-import { execSync } from 'child_process';
 import { logger } from '../utils/logger';
 import type {
   HealthStatus,
@@ -149,15 +148,16 @@ export class HealthCollector {
     ind: InternalIndicator,
     timeoutMs: number,
   ): Promise<HealthComponentResponse> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const result = await Promise.race<HealthIndicatorResult>([
         ind.check(),
         new Promise<never>((_, reject) => {
-          const t = setTimeout(
+          timer = setTimeout(
             () => reject(new Error(`Health check '${ind.name}' timed out after ${timeoutMs}ms`)),
             timeoutMs,
           );
-          if (typeof t.unref === 'function') t.unref();
+          if (typeof timer.unref === 'function') timer.unref();
         }),
       ]);
       return result.details
@@ -166,6 +166,8 @@ export class HealthCollector {
     } catch (err: any) {
       logger.warn(`Health indicator '${ind.name}' failed`, { error: err.message });
       return { status: 'DOWN', details: { error: err.message } };
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 
@@ -221,65 +223,21 @@ export class HealthCollector {
   }
 
   private getDiskSpace(diskPath: string): { free: number; total: number } {
-    // Prefer fs.statfsSync — cross-platform, no shell commands (Node >= 18.15)
-    if (typeof (fs as any).statfsSync === 'function') {
-      const stats = (fs as any).statfsSync(diskPath);
-      return {
-        total: stats.blocks * stats.bsize,
-        free: stats.bavail * stats.bsize,
-      };
+    // fs.statfsSync is cross-platform and avoids shelling out (Node >= 18.15,
+    // which matches our supported engine range). No command execution means no
+    // command-injection surface from a user-supplied path.
+    const statfs = (fs as unknown as {
+      statfsSync?: (p: string) => { blocks: number; bsize: number; bavail: number };
+    }).statfsSync;
+
+    if (typeof statfs !== 'function') {
+      throw new Error('fs.statfsSync is unavailable; Node >= 18.15 is required for disk-space checks');
     }
 
-    /* istanbul ignore next: legacy fallback path for Node 18.0–18.14 only */
-    logger.debug('fs.statfsSync unavailable, falling back to shell commands');
-
-    /* istanbul ignore next: legacy fallback path for Node 18.0–18.14 only */
-    if (process.platform === 'win32') {
-      return this.getDiskSpaceWindows(diskPath);
-    }
-    /* istanbul ignore next: legacy fallback path for Node 18.0–18.14 only */
-    return this.getDiskSpaceUnix(diskPath);
-  }
-
-  /* istanbul ignore next: shell-command fallback path for Node 18.0–18.14 only */
-  private getDiskSpaceWindows(diskPath: string): { free: number; total: number } {
-    try {
-      // PowerShell works on all modern Windows (10+, Server 2016+)
-      const drive = diskPath.charAt(0).toUpperCase();
-      const cmd = `powershell -NoProfile -Command "(Get-PSDrive ${drive}).Free,(Get-PSDrive ${drive}).Used"`;
-      const out = execSync(cmd, { encoding: 'utf8', timeout: 5000 }).trim();
-      const lines = out.split(/\r?\n/).filter(Boolean);
-      const free = Number(lines[0]);
-      const used = Number(lines[1]);
-      return { total: free + used, free };
-    } catch {
-      // Last resort — wmic (deprecated but still present on older systems)
-      try {
-        const drive = diskPath.charAt(0).toUpperCase();
-        const out = execSync(
-          `wmic logicaldisk where "DeviceID='${drive}:'" get FreeSpace,Size /format:csv`,
-          { encoding: 'utf8', timeout: 5000 },
-        );
-        const lines = out.trim().split(/\r?\n/).filter(Boolean);
-        const last = lines[lines.length - 1]!;
-        const parts = last.split(',');
-        return { free: Number(parts[1]), total: Number(parts[2]) };
-      } catch {
-        throw new Error(`Unable to determine disk space on Windows for path: ${diskPath}`);
-      }
-    }
-  }
-
-  /* istanbul ignore next: shell-command fallback path for Node 18.0–18.14 only */
-  private getDiskSpaceUnix(diskPath: string): { free: number; total: number } {
-    // df -Pk works on both Linux and macOS
-    const out = execSync(`df -Pk "${diskPath}"`, { encoding: 'utf8', timeout: 5000 });
-    const lines = out.trim().split('\n');
-    const dataLine = lines[lines.length - 1]!;
-    const cols = dataLine.trim().split(/\s+/);
+    const stats = statfs(diskPath);
     return {
-      total: Number(cols[1]) * 1024,
-      free: Number(cols[3]) * 1024,
+      total: stats.blocks * stats.bsize,
+      free: stats.bavail * stats.bsize,
     };
   }
 

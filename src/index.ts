@@ -44,12 +44,20 @@ export { actuatorMiddleware } from './middleware/express';
 export type { ActuatorMiddlewareResult } from './middleware/express';
 export { actuatorPlugin } from './middleware/fastify';
 export type { ActuatorPluginOptions } from './middleware/fastify';
+export { actuatorKoa } from './middleware/koa';
+export type { ActuatorKoaResult } from './middleware/koa';
+export { actuatorHttp } from './middleware/http';
+export type { ActuatorHttpResult } from './middleware/http';
 
 // Logger
 export { logger, LOG_LEVELS } from './utils/logger';
 export type { LogLevel } from './utils/logger';
 
-const defaultActuator = new NodeActuator({ serverless: true });
+let defaultActuator: NodeActuator | undefined;
+function getDefaultActuator(): NodeActuator {
+  if (!defaultActuator) defaultActuator = new NodeActuator({ serverless: true });
+  return defaultActuator;
+}
 
 export function registerEndpoint(endpoint: CustomEndpointRegistration): void;
 export function registerEndpoint(
@@ -71,5 +79,5 @@ export function registerEndpoint(
 }
 
 export async function invokeEndpoint(path: string, context?: CustomEndpointContext): Promise<any> {
-  return defaultActuator.invokeEndpoint(path, context);
+  return getDefaultActuator().invokeEndpoint(path, context);
 }

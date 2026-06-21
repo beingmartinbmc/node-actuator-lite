@@ -28,15 +28,6 @@ export function actuatorMiddleware(options: ActuatorOptions = {}): ActuatorMiddl
   const opts: ActuatorOptions = { ...options, serverless: true };
   const actuator = new NodeActuator(opts);
   const basePath = opts.basePath ?? '/actuator';
-  const enabled = {
-    health: opts.health?.enabled ?? true,
-    env: opts.env?.enabled ?? true,
-    threadDump: opts.threadDump?.enabled ?? true,
-    heapDump: opts.heapDump?.enabled ?? true,
-    prometheus: opts.prometheus?.enabled ?? true,
-    info: opts.info?.enabled ?? true,
-    metrics: opts.metrics?.enabled ?? true,
-  };
 
   const handler: ExpressMiddleware = async (req: any, res: any, next: any) => {
     const url: string = req.originalUrl || req.url || '';
@@ -44,79 +35,32 @@ export function actuatorMiddleware(options: ActuatorOptions = {}): ActuatorMiddl
 
     if (!url.startsWith(basePath)) return next();
 
-    const subPath = url.slice(basePath.length).split('?')[0] || '';
-    const query = req.query || {};
+    const subPath = url.slice(basePath.length).split('?')[0] || '/';
+    const query: Record<string, string> = req.query || {};
 
     try {
-      // Discovery
-      if (subPath === '' || subPath === '/') {
-        return res.json(actuator.discovery());
-      }
-
-      // Health
-      if (enabled.health && subPath === '/health' && method === 'GET') {
-        const result = await actuator.getHealth(query.showDetails);
-        return res.status(result.status === 'UP' ? 200 : 503).json(result);
-      }
-
-      const healthMatch = subPath.match(/^\/health\/(.+)$/);
-      if (enabled.health && healthMatch && method === 'GET') {
-        const name = decodeURIComponent(healthMatch[1]!);
-        const group = await actuator.getHealthGroup(name);
-        if (group) return res.status(group.status === 'UP' ? 200 : 503).json(group);
-        const comp = await actuator.getHealthComponent(name);
-        if (comp) return res.status(comp.status === 'UP' ? 200 : 503).json(comp);
-        return res.status(404).json({ error: `Health component '${name}' not found` });
-      }
-
-      // Environment
-      if (enabled.env && subPath === '/env' && method === 'GET') {
-        return res.json(actuator.getEnv());
-      }
-
-      const envMatch = subPath.match(/^\/env\/(.+)$/);
-      if (enabled.env && envMatch && method === 'GET') {
-        const name = decodeURIComponent(envMatch[1]!);
-        const v = actuator.getEnvVariable(name);
-        return v ? res.json(v) : res.status(404).json({ error: `Variable '${name}' not found` });
-      }
-
-      // Thread dump
-      if (enabled.threadDump && subPath === '/threaddump' && method === 'GET') {
-        return res.json(actuator.getThreadDump());
-      }
-
-      // Heap dump
-      if (enabled.heapDump && subPath === '/heapdump' && method === 'POST') {
-        return res.json(await actuator.getHeapDump());
-      }
-
-      // Prometheus
-      if (enabled.prometheus && subPath === '/prometheus' && method === 'GET') {
-        res.set('Content-Type', 'text/plain; charset=utf-8');
-        return res.send(await actuator.getPrometheus());
-      }
-
-      if (enabled.info && subPath === '/info' && method === 'GET') {
-        return res.json(await actuator.getInfoAsync());
-      }
-
-      if (enabled.metrics && subPath === '/metrics' && method === 'GET') {
-        return res.json(actuator.getMetrics());
-      }
-
-      const endpointResult = await actuator.invokeEndpoint(subPath, {
+      const result = await actuator.dispatch({
         method,
-        path: subPath,
+        subPath,
         query,
+        params: {},
+        body: req.body,
         raw: req,
       });
-      if (endpointResult !== null) {
-        return res.json(endpointResult);
+
+      if (!result) {
+        return res.status(404).json({ error: 'Not found' });
       }
 
-      // Unknown actuator sub-path
-      return res.status(404).json({ error: 'Not found' });
+      if (result.contentType === 'text') {
+        res.set('Content-Type', 'text/plain; charset=utf-8');
+        return res.status(result.status).send(String(result.body));
+      }
+      if (result.contentType === 'html') {
+        res.set('Content-Type', 'text/html; charset=utf-8');
+        return res.status(result.status).send(String(result.body));
+      }
+      return res.status(result.status).json(result.body);
     } catch (err: any) {
       return res.status(500).json({ error: 'Internal Server Error' });
     }
