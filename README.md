@@ -5,7 +5,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/node-actuator-lite.svg)](https://www.npmjs.com/package/node-actuator-lite)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Spring Boot Actuator for Node.js — lightweight monitoring endpoints with a single dependency.
+Spring Boot Actuator for Node.js — lightweight monitoring endpoints, a built-in dashboard, and a single runtime dependency.
 
 <p align="center">
   <img src="./assets/banner.png" alt="node-actuator-lite — Spring Boot Actuator for Node.js" width="900" />
@@ -13,19 +13,36 @@ Spring Boot Actuator for Node.js — lightweight monitoring endpoints with a sin
 
 ## Why?
 
-If you're coming from Spring Boot, you expect `/actuator/health`, `/actuator/env`, and `/actuator/prometheus` out of the box. This library gives you exactly that for Node.js — **one dependency, zero config, works with any framework or serverless**.
+If you're coming from Spring Boot, you expect `/actuator/health`, `/actuator/info`, `/actuator/env`, and `/actuator/prometheus` out of the box. This library gives you exactly that for Node.js — **one dependency, zero config, and adapters for Express, Fastify, Koa, the built-in `http` module, and serverless**. It also ships a self-contained HTML dashboard so you can eyeball your service without wiring up Grafana first.
+
+## Features
+
+- **Health** — shallow (status only) and deep (per-component details), custom indicators, and health groups for Kubernetes liveness / readiness.
+- **Info** — build metadata plus runtime details, with pluggable info contributors.
+- **Metrics** — process-level CPU, memory, and uptime as JSON.
+- **Environment** — `process.env` as Spring-style property sources, with automatic sensitive-value masking and an optional allowlist.
+- **Thread Dump** — event-loop state, active handles/requests, V8 heap stats, and worker threads.
+- **Heap Dump** — V8 heap snapshots saved to disk, throttled to prevent abuse.
+- **Prometheus** — all default Node.js metrics plus custom counters, gauges, histograms, and summaries via `prom-client`.
+- **Dashboard** — a self-contained HTML page at `/actuator/dashboard` that surfaces every enabled endpoint.
+- **Discovery** — `GET /actuator` lists all enabled endpoints, just like Spring Boot.
+- **Custom endpoints** — register your own routes under `/actuator`, per instance or globally.
+- **Framework adapters** — Express, Fastify, Koa, and `node:http`, plus a serverless mode with direct method calls.
+- **Pluggable auth & logging** — a single `auth` callback guards every endpoint, and any logger (pino, winston, …) can be injected.
+- **Single runtime dependency** — `prom-client`.
 
 ## Production Safety
 
-Actuator endpoints expose operational data. Keep them on a private network, behind authentication, or disabled unless you explicitly need them. This is especially important for `/actuator/env`, `/actuator/threaddump`, and `/actuator/heapdump`.
+Actuator endpoints expose operational data. Keep them on a private network, behind authentication, or disabled unless you explicitly need them. This matters most for `/actuator/env`, `/actuator/threaddump`, and `/actuator/heapdump`.
 
-Recommended public-facing baseline:
+A sensible public-facing baseline locks down the sensitive endpoints and gates everything behind an auth callback:
 
 ```typescript
 import { NodeActuator } from 'node-actuator-lite';
 
 const actuator = new NodeActuator({
   port: 8081,
+  auth: ({ raw }) => true, // replace with a real token/allowlist check
   health: {
     showDetails: 'never',
     groups: {
@@ -40,43 +57,7 @@ const actuator = new NodeActuator({
 });
 ```
 
-For Express/Fastify, mount the actuator middleware behind your existing auth or network allowlist. Enable `env`, `threaddump`, or `heapdump` only for trusted operators and short-lived debugging sessions.
-
-## Features
-
-- **Health** — shallow (status only) and deep (per-component details), custom indicators, health groups (liveness / readiness)
-- **Environment** — `process.env` with automatic sensitive-value masking
-- **Thread Dump** — event loop state, active handles/requests, V8 heap stats, worker threads
-- **Heap Dump** — V8 heap snapshots saved to disk
-- **Prometheus** — all default Node.js metrics + custom counters, gauges, histograms, summaries via `prom-client`
-- **Discovery** — `GET /actuator` lists all enabled endpoints (like Spring Boot)
-- **Dual mode** — standalone HTTP server *or* serverless (direct method calls, no port needed)
-- **Single runtime dependency** — `prom-client`
-
-## Ecosystem
-
-`node-actuator-lite` is part of a small Node.js observability ecosystem you can adopt independently or together:
-
-- **`node-actuator-lite`** — Spring Boot-style `/actuator/health`, `/info`, `/metrics`, `/env`, `/threaddump`, `/heapdump`, and `/prometheus` endpoints.
-- [`node-eventloop-watchdog`](https://github.com/beingmartinbmc/node-eventloop-watchdog) — Detects event-loop stalls, captures stack traces and hotspots, and triggers recovery.
-- [`node-request-trace`](https://github.com/beingmartinbmc/node-request-trace) — Per-request timelines, browser dashboard, and CLI without OpenTelemetry.
-
-When all three are installed:
-
-- `node-eventloop-watchdog` automatically registers `/actuator/eventloop`, `/actuator/eventloop/history`, `/actuator/eventloop/hotspots`, and `/actuator/eventloop/metrics` under this actuator.
-- Event-loop block events include the active request id, route, and method captured by `node-request-trace`.
-
-Runnable example: [`examples/ecosystem`](./examples/ecosystem).
-
-> **Quickest setup:** Use [`node-observability-lite`](https://github.com/beingmartinbmc/node-observability-lite) to wire the three packages together with production-safe presets in one line.
->
-> ```js
-> const observability = require('node-observability-lite');
-> observability.express(app, {
->   preset: 'production',
->   auth: req => req.get('authorization') === `Bearer ${process.env.OPS_TOKEN}`,
-> });
-> ```
+For the framework adapters, mount the actuator behind your existing auth or network allowlist, and enable `env`, `threaddump`, or `heapdump` only for trusted operators during short-lived debugging sessions.
 
 ## Installation
 
@@ -84,16 +65,7 @@ Runnable example: [`examples/ecosystem`](./examples/ecosystem).
 npm install node-actuator-lite
 ```
 
-> Requires **Node.js >= 18**.
-
-## Try It
-
-Runnable examples live in [`examples/`](./examples):
-
-- Express app with bearer-token protected actuator routes
-- Fastify app with safe endpoint defaults
-- AWS Lambda handler using serverless mode
-- Kubernetes deployment probes for liveness and readiness
+> Requires **Node.js >= 18**. The only runtime dependency is `prom-client`.
 
 ## Quick Start
 
@@ -127,9 +99,10 @@ const actuator = new NodeActuator({
 
 await actuator.start();
 // Actuator listening on http://localhost:8081/actuator
+// Dashboard at        http://localhost:8081/actuator/dashboard
 ```
 
-### Express (one-liner)
+### Express
 
 ```typescript
 import express from 'express';
@@ -146,7 +119,7 @@ app.use(handler);
 app.listen(3000);
 ```
 
-### Fastify (plugin)
+### Fastify
 
 ```typescript
 import Fastify from 'fastify';
@@ -154,12 +127,44 @@ import { actuatorPlugin } from 'node-actuator-lite';
 
 const app = Fastify();
 await app.register(actuatorPlugin, { prometheus: { defaultMetrics: true } });
-// All /actuator/* routes registered. Access via app.actuator.
+// All /actuator/* routes registered. Access the instance via app.actuator.
 
 await app.listen({ port: 3000 });
 ```
 
+### Koa
+
+```typescript
+import Koa from 'koa';
+import { actuatorKoa } from 'node-actuator-lite/middleware/koa';
+
+const app = new Koa();
+const { middleware, actuator } = actuatorKoa({ prometheus: { defaultMetrics: true } });
+app.use(middleware);
+
+// actuator.prometheus.metric('my_counter')!.inc();
+
+app.listen(3000);
+```
+
+### Built-in `node:http` (and connect-style stacks)
+
+```typescript
+import http from 'node:http';
+import { actuatorHttp } from 'node-actuator-lite/middleware/http';
+
+const { handler, actuator } = actuatorHttp({ prometheus: { defaultMetrics: true } });
+
+// As a standalone server:
+http.createServer(handler).listen(8080);
+
+// Or chained to your own router — requests outside basePath fall through to next():
+// server.on('request', (req, res) => handler(req, res, () => myRouter(req, res)));
+```
+
 ### Serverless (Vercel, Lambda, etc.)
+
+In serverless mode no server is started; you call the data methods directly.
 
 ```typescript
 import { NodeActuator } from 'node-actuator-lite';
@@ -169,6 +174,8 @@ await actuator.start(); // no-op, no server started
 
 const health  = await actuator.getHealth();          // shallow
 const deep    = await actuator.getHealth('always');   // deep
+const info    = await actuator.getInfoAsync();
+const metrics = actuator.getMetrics();
 const prom    = await actuator.getPrometheus();
 const env     = actuator.getEnv();
 const threads = actuator.getThreadDump();
@@ -177,28 +184,72 @@ const heap    = await actuator.getHeapDump();
 
 ## Endpoints
 
-All endpoints live under the configured `basePath` (default `/actuator`).
+All endpoints live under the configured `basePath` (default `/actuator`). Each row appears in discovery only when its feature is enabled.
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/actuator` | Discovery — lists all enabled endpoints |
+| GET | `/actuator/dashboard` | Self-contained HTML dashboard |
 | GET | `/actuator/health` | Health check (shallow or deep based on config) |
 | GET | `/actuator/health?showDetails=always` | Force deep health check |
 | GET | `/actuator/health/{component}` | Single health component |
 | GET | `/actuator/health/{group}` | Health group (e.g. `liveness`, `readiness`) |
+| GET | `/actuator/info` | Build and runtime information |
+| GET | `/actuator/metrics` | Process metrics (CPU, memory, uptime) as JSON |
 | GET | `/actuator/env` | Environment variables (masked) |
 | GET | `/actuator/env/{name}` | Single environment variable |
 | GET | `/actuator/threaddump` | Thread / event-loop dump |
 | POST | `/actuator/heapdump` | Generate and save a V8 heap snapshot |
 | GET | `/actuator/prometheus` | Prometheus metrics (text exposition format) |
 
+## Dashboard
+
+A self-contained HTML dashboard is served at `<basePath>/dashboard` (enabled by default). It renders the discovery view and links to every enabled endpoint, with no external assets or CDN calls — useful for a quick look at a running service before reaching for a full metrics stack.
+
+Disable it in locked-down environments:
+
+```typescript
+const actuator = new NodeActuator({ dashboard: { enabled: false } });
+```
+
 ## Configuration
+
+The full option shape lives in [`src/core/types.ts`](./src/core/types.ts) (`ActuatorOptions`). The most common options:
 
 ```typescript
 interface ActuatorOptions {
-  port?: number;            // default 0 (random)
+  port?: number;            // default 0 (random); standalone server only
   basePath?: string;        // default '/actuator'
   serverless?: boolean;     // default false
+
+  /** Authorization callback applied to every endpoint. Return false → 401. */
+  auth?: (ctx: {
+    method: string;
+    subPath: string;
+    query: Record<string, string>;
+    params: Record<string, string>;
+    raw?: unknown;
+  }) => boolean | Promise<boolean>;
+
+  /** Custom logger (pino/winston/…). Defaults to the built-in JSON console logger. */
+  logger?: {
+    trace(msg: string, data?: unknown): void;
+    debug(msg: string, data?: unknown): void;
+    info(msg: string, data?: unknown): void;
+    warn(msg: string, data?: unknown): void;
+    error(msg: string, data?: unknown): void;
+  };
+
+  info?: {
+    enabled?: boolean;                  // default true
+    build?: Record<string, any>;        // overrides auto-detected package.json info
+    contributors?: Array<{
+      name: string;
+      collect: () => Record<string, any> | Promise<Record<string, any>>;
+    }>;
+  };
+
+  metrics?: { enabled?: boolean };      // default true
 
   health?: {
     enabled?: boolean;                  // default true
@@ -222,6 +273,7 @@ interface ActuatorOptions {
       patterns?: string[];    // default ['PASSWORD','SECRET','KEY','TOKEN','AUTH','CREDENTIAL','PRIVATE','SIGNATURE']
       additional?: string[];  // extra variable names to mask
       replacement?: string;   // default '******'
+      allowlist?: string[];   // if set, ONLY these variables are exposed at all
     };
   };
 
@@ -230,6 +282,7 @@ interface ActuatorOptions {
   heapDump?: {
     enabled?: boolean;      // default true
     outputDir?: string;     // default './heapdumps'
+    minIntervalMs?: number; // throttle window between dumps, default 60000 (0 disables)
   };
 
   prometheus?: {
@@ -244,18 +297,35 @@ interface ActuatorOptions {
       buckets?: number[];   // histogram only
     }>;
   };
+
+  /** Built-in HTML dashboard at `<basePath>/dashboard`. Enabled by default. */
+  dashboard?: { enabled?: boolean };
+
+  /** Custom endpoints mounted under basePath. */
+  endpoints?: Array<{
+    id: string;
+    method?: 'GET' | 'POST';
+    handler: (context?: {
+      method?: string;
+      path?: string;
+      params?: Record<string, string>;
+      query?: Record<string, string>;
+      raw?: any;
+    }) => any | Promise<any>;
+    contentType?: 'json' | 'text';
+  }>;
 }
 ```
 
 ## Health — Shallow vs Deep
 
-**Shallow** (`showDetails: 'never'` or default `GET /actuator/health`):
+**Shallow** (`showDetails: 'never'`, or the default `GET /actuator/health`):
 
 ```json
 { "status": "UP" }
 ```
 
-**Deep** (`showDetails: 'always'` or `GET /actuator/health?showDetails=always`):
+**Deep** (`showDetails: 'always'`, or `GET /actuator/health?showDetails=always`):
 
 ```json
 {
@@ -318,16 +388,60 @@ const actuator = new NodeActuator({
 });
 ```
 
-Add/remove at runtime:
+Add or remove indicators at runtime:
 
 ```typescript
 actuator.health.addIndicator({ name: 'cache', check: async () => ({ status: 'UP' }) });
 actuator.health.removeIndicator('cache');
 ```
 
+## Info
+
+`GET /actuator/info` returns build metadata (auto-detected from `package.json`, or overridden via `info.build`) plus runtime details. Info contributors let you append computed sections:
+
+```typescript
+const actuator = new NodeActuator({
+  info: {
+    build: { name: 'orders-service', version: '1.4.2' },
+    contributors: [
+      { name: 'git', collect: () => ({ commit: process.env.GIT_SHA }) },
+    ],
+  },
+});
+```
+
+```json
+{
+  "build": { "name": "orders-service", "version": "1.4.2" },
+  "runtime": {
+    "nodeVersion": "v20.11.0",
+    "platform": "linux",
+    "arch": "x64",
+    "pid": 12345,
+    "cwd": "/app",
+    "uptime": 3600
+  },
+  "contributors": { "git": { "commit": "a1b2c3d" } }
+}
+```
+
+## Metrics
+
+`GET /actuator/metrics` returns process-level metrics as JSON (distinct from the Prometheus text endpoint):
+
+```json
+{
+  "process": {
+    "uptime": 3600,
+    "memory": { "rss": 52428800, "heapTotal": 20971520, "heapUsed": 15728640 },
+    "cpu": { "user": 1200000, "system": 350000 }
+  }
+}
+```
+
 ## Environment
 
-The `/env` endpoint returns a Spring-style property-source response:
+`GET /actuator/env` returns a Spring-style property-source response with sensitive values masked:
 
 ```json
 {
@@ -351,86 +465,11 @@ The `/env` endpoint returns a Spring-style property-source response:
 }
 ```
 
-### Masking
-
-Sensitive values are masked by default. Customise patterns:
-
-```typescript
-const actuator = new NodeActuator({
-  env: {
-    mask: {
-      patterns: ['PASSWORD', 'SECRET', 'KEY', 'TOKEN'],
-      additional: ['MY_CUSTOM_VAR'],
-      replacement: '[REDACTED]',
-    },
-  },
-});
-```
-
-Runtime management:
-
-```typescript
-actuator.env.addMaskPattern('STRIPE');
-actuator.env.addMaskVariable('SPECIAL_KEY');
-actuator.env.removeMaskPattern('KEY');
-```
-
-## Prometheus
-
-Default Node.js metrics (CPU, memory, event loop lag, GC, etc.) are collected automatically. Add custom metrics:
-
-```typescript
-const actuator = new NodeActuator({
-  prometheus: {
-    customMetrics: [
-      { name: 'http_requests_total', help: 'Total requests', type: 'counter', labels: ['method', 'status'] },
-      { name: 'request_duration_seconds', help: 'Request duration', type: 'histogram', buckets: [0.01, 0.05, 0.1, 0.5, 1] },
-      { name: 'active_connections', help: 'Active connections', type: 'gauge' },
-    ],
-  },
-});
-
-await actuator.start();
-
-// Use metrics
-const counter = actuator.prometheus.metric('http_requests_total');
-counter.inc({ method: 'GET', status: '200' });
-
-const gauge = actuator.prometheus.metric('active_connections');
-gauge.set(42);
-```
-
-Access the raw `prom-client` registry:
-
-```typescript
-actuator.prometheus.getRegistry();
-```
-
-## Thread Dump
-
-`GET /actuator/threaddump` returns:
-
-```json
-{
-  "timestamp": "2025-01-15T10:30:00.000Z",
-  "pid": 12345,
-  "nodeVersion": "v20.11.0",
-  "platform": "linux",
-  "uptime": 3600,
-  "mainThread": { "name": "main", "state": "RUNNABLE", "cpuUsage": { "user": 500000, "system": 100000 } },
-  "eventLoop": {
-    "activeHandles": { "count": 5, "types": ["Server", "Socket", "Timer"] },
-    "activeRequests": { "count": 0, "types": [] }
-  },
-  "workers": [],
-  "memory": { "rss": 52428800, "heapTotal": 20971520, "heapUsed": 15728640, "external": 1048576 },
-  "v8HeapStats": { "total_heap_size": 20971520, "used_heap_size": 15728640, "..." : "..." }
-}
-```
+For defence-in-depth in production, set `env.mask.allowlist` so that **only** named variables are exposed and everything else is omitted entirely.
 
 ## Heap Dump
 
-`POST /actuator/heapdump` generates a V8 heap snapshot and saves it to disk:
+`POST /actuator/heapdump` writes a `.heapsnapshot` to `heapDump.outputDir` and returns metadata:
 
 ```json
 {
@@ -444,7 +483,35 @@ actuator.prometheus.getRegistry();
 }
 ```
 
-Open the `.heapsnapshot` file in Chrome DevTools → Memory → Load.
+Heap dumps block the event loop, so requests are throttled to one per `heapDump.minIntervalMs` (default 60s). Open the `.heapsnapshot` file in Chrome DevTools → Memory → Load.
+
+## Custom Endpoints
+
+Mount your own endpoints under `basePath`. They appear in discovery and are served by every adapter.
+
+Per instance, via config:
+
+```typescript
+const actuator = new NodeActuator({
+  endpoints: [
+    { id: 'build', handler: () => ({ commit: process.env.GIT_SHA }) },
+  ],
+});
+```
+
+Or at runtime on an instance:
+
+```typescript
+actuator.registerEndpoint({ id: 'cache-stats', handler: () => cache.stats() });
+```
+
+Or globally — useful for ecosystem packages that extend any actuator created afterwards:
+
+```typescript
+import { registerEndpoint } from 'node-actuator-lite';
+
+registerEndpoint('feature-flags', () => flags.snapshot(), { contentType: 'json' });
+```
 
 ## Serverless Integration
 
@@ -465,6 +532,10 @@ export default async function handler(req, res) {
       return res.json(actuator.discovery());
     case 'health':
       return res.json(await actuator.getHealth());
+    case 'info':
+      return res.json(await actuator.getInfoAsync());
+    case 'metrics':
+      return res.json(actuator.getMetrics());
     case 'env':
       return res.json(actuator.getEnv());
     case 'threaddump':
@@ -491,6 +562,8 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
   const routes: Record<string, () => Promise<{ code: number; type: string; body: string }>> = {
     health: async () => ({ code: 200, type: 'application/json', body: JSON.stringify(await actuator.getHealth()) }),
+    info: async () => ({ code: 200, type: 'application/json', body: JSON.stringify(await actuator.getInfoAsync()) }),
+    metrics: async () => ({ code: 200, type: 'application/json', body: JSON.stringify(actuator.getMetrics()) }),
     env: async () => ({ code: 200, type: 'application/json', body: JSON.stringify(actuator.getEnv()) }),
     prometheus: async () => ({ code: 200, type: 'text/plain', body: await actuator.getPrometheus() }),
     threaddump: async () => ({ code: 200, type: 'application/json', body: JSON.stringify(actuator.getThreadDump()) }),
@@ -506,7 +579,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
 ## Programmatic API
 
-All data is available via methods — no HTTP server required.
+Every endpoint has a method equivalent — no HTTP server required.
 
 ```typescript
 const actuator = new NodeActuator({ serverless: true });
@@ -515,10 +588,15 @@ const actuator = new NodeActuator({ serverless: true });
 actuator.discovery();
 
 // Health
-await actuator.getHealth();                  // shallow or deep (based on config)
+await actuator.getHealth();                   // shallow or deep (based on config)
 await actuator.getHealth('always');           // force deep
 await actuator.getHealthComponent('diskSpace');
 await actuator.getHealthGroup('readiness');
+
+// Info & metrics
+actuator.getInfo();         // sync, no contributors
+await actuator.getInfoAsync(); // includes contributors
+actuator.getMetrics();
 
 // Environment
 actuator.getEnv();
@@ -532,7 +610,45 @@ await actuator.getHeapDump();
 
 // Prometheus
 await actuator.getPrometheus();
+
+// Custom endpoints
+actuator.registerEndpoint({ id: 'build', handler: () => ({ commit: 'abc' }) });
+await actuator.invokeEndpoint('build');
 ```
+
+## Ecosystem
+
+`node-actuator-lite` is part of a small Node.js observability ecosystem you can adopt independently or together:
+
+- **`node-actuator-lite`** — Spring Boot-style `/actuator/health`, `/info`, `/metrics`, `/env`, `/threaddump`, `/heapdump`, and `/prometheus` endpoints.
+- [`node-eventloop-watchdog`](https://github.com/beingmartinbmc/node-eventloop-watchdog) — Detects event-loop stalls, captures stack traces and hotspots, and triggers recovery.
+- [`node-request-trace`](https://github.com/beingmartinbmc/node-request-trace) — Per-request timelines, browser dashboard, and CLI without OpenTelemetry.
+
+When all three are installed:
+
+- `node-eventloop-watchdog` automatically registers `/actuator/eventloop`, `/actuator/eventloop/history`, `/actuator/eventloop/hotspots`, and `/actuator/eventloop/metrics` under this actuator.
+- Event-loop block events include the active request id, route, and method captured by `node-request-trace`.
+
+Runnable example: [`examples/ecosystem`](./examples/ecosystem).
+
+> **Quickest setup:** Use [`node-observability-lite`](https://github.com/beingmartinbmc/node-observability-lite) to wire the three packages together with production-safe presets in one line.
+>
+> ```js
+> const observability = require('node-observability-lite');
+> observability.express(app, {
+>   preset: 'production',
+>   auth: req => req.get('authorization') === `Bearer ${process.env.OPS_TOKEN}`,
+> });
+> ```
+
+## Examples
+
+Runnable examples live in [`examples/`](./examples):
+
+- Express app with bearer-token protected actuator routes
+- Fastify app with safe endpoint defaults
+- AWS Lambda handler using serverless mode
+- Kubernetes deployment probes for liveness and readiness
 
 ## Contributing
 

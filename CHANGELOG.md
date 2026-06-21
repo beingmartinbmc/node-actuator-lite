@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## Unreleased
 
+## 3.3.1 - 2026-06-21
+
+### Documentation
+
+- Rewrote the README in a single consistent voice and brought it up to date with the 3.3.0 surface: Koa and `node:http` adapters, the built-in HTML dashboard, `/info` and `/metrics` endpoints, custom endpoint registration, the `auth` callback, pluggable logger, and the `env` allowlist and heap-dump throttling options.
+
+### Fixed
+
+- Package smoke test now expects the `dashboard` discovery link and exercises the Koa and `node:http` adapter exports.
+
+## 3.3.0 - 2026-06-21
+
+### Added
+
+- Framework-agnostic adapters for Koa (`actuatorKoa`) and the built-in `node:http` module (`actuatorHttp`).
+- Self-contained HTML dashboard served at `<basePath>/dashboard`, enabled by default.
+
 ## 3.2.1 - 2026-05-02
 
 ### Fixed
