@@ -6,10 +6,38 @@ export type HealthStatus = 'UP' | 'DOWN' | 'OUT_OF_SERVICE' | 'UNKNOWN';
 
 export type ShowDetails = 'never' | 'always';
 
+/**
+ * Authorization callback. Receives a transport-agnostic request context and
+ * must return `true` to allow the request or `false` to reject it with 401.
+ * Applies to every actuator endpoint across the standalone server, the Express
+ * middleware, and the Fastify plugin.
+ */
+export type AuthCallback = (ctx: {
+  method: string;
+  subPath: string;
+  query: Record<string, string>;
+  params: Record<string, string>;
+  raw?: unknown;
+}) => boolean | Promise<boolean>;
+
+/** Minimal logger interface so a custom logger (pino/winston/…) can be injected. */
+export interface ActuatorLogger {
+  trace(msg: string, data?: unknown): void;
+  debug(msg: string, data?: unknown): void;
+  info(msg: string, data?: unknown): void;
+  warn(msg: string, data?: unknown): void;
+  error(msg: string, data?: unknown): void;
+}
+
 export interface ActuatorOptions {
   port?: number;
   basePath?: string;
   serverless?: boolean;
+
+  /** Optional authorization callback applied to every endpoint. */
+  auth?: AuthCallback;
+  /** Optional custom logger. Defaults to the built-in JSON console logger. */
+  logger?: ActuatorLogger;
 
   info?: InfoConfig;
   metrics?: MetricsConfig;
@@ -18,6 +46,8 @@ export interface ActuatorOptions {
   threadDump?: { enabled?: boolean };
   heapDump?: HeapDumpConfig;
   prometheus?: PrometheusConfig;
+  /** Built-in HTML dashboard served at `<basePath>/dashboard`. Enabled by default. */
+  dashboard?: { enabled?: boolean };
   endpoints?: CustomEndpointRegistration[];
 }
 
@@ -45,12 +75,24 @@ export interface EnvConfig {
     patterns?: string[];
     additional?: string[];
     replacement?: string;
+    /**
+     * When set, only variables whose name is in this allowlist are exposed at
+     * all. Everything else is omitted entirely (names included). Use this for
+     * defence-in-depth when exposing /env in production.
+     */
+    allowlist?: string[];
   };
 }
 
 export interface HeapDumpConfig {
   enabled?: boolean;
   outputDir?: string;
+  /**
+   * Minimum interval (ms) between successive heap dumps. Additional requests
+   * within this window are rejected to prevent event-loop-blocking DoS.
+   * Defaults to 60000 (1 minute). Set to 0 to disable throttling.
+   */
+  minIntervalMs?: number;
 }
 
 export interface PrometheusConfig {
@@ -201,6 +243,7 @@ export interface ResolvedActuatorOptions {
   port: number;
   basePath: string;
   serverless: boolean;
+  auth: AuthCallback | undefined;
 
   info: {
     enabled: boolean;
@@ -230,6 +273,7 @@ export interface ResolvedActuatorOptions {
       patterns: string[];
       additional: string[];
       replacement: string;
+      allowlist?: string[] | undefined;
     };
   };
 
@@ -238,6 +282,7 @@ export interface ResolvedActuatorOptions {
   heapDump: {
     enabled: boolean;
     outputDir: string;
+    minIntervalMs: number;
   };
 
   prometheus: {
@@ -246,6 +291,8 @@ export interface ResolvedActuatorOptions {
     prefix: string;
     customMetrics: CustomMetricDefinition[];
   };
+
+  dashboard: { enabled: boolean };
 
   endpoints: CustomEndpointRegistration[];
 }

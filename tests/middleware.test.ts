@@ -37,6 +37,7 @@ describe('actuatorMiddleware', () => {
       prometheus: { enabled: false, defaultMetrics: false },
       info: { enabled: false },
       metrics: { enabled: false },
+      dashboard: { enabled: false },
     });
     const req = { originalUrl: url, url, method, query: {} };
     const res = createMockResponse();
@@ -315,6 +316,33 @@ describe('actuatorMiddleware', () => {
     expect(res.status).toHaveBeenCalledWith(500);
     expect(res.body).toEqual({ error: 'Internal Server Error' });
   });
+
+  test('falls back when req lacks originalUrl, method, and query', async () => {
+    const { handler } = actuatorMiddleware({ prometheus: { defaultMetrics: false } });
+    const res = createMockResponse();
+    const next = jest.fn();
+
+    // No originalUrl (only url), no method (defaults to GET), no query object.
+    await Promise.resolve(handler(
+      { url: '/actuator/info' },
+      res,
+      next,
+    ));
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(200);
+    expect(res.body.runtime.nodeVersion).toBe(process.version);
+  });
+
+  test('passes through when req has no url at all', async () => {
+    const { handler } = actuatorMiddleware({ prometheus: { defaultMetrics: false } });
+    const res = createMockResponse();
+    const next = jest.fn();
+
+    await Promise.resolve(handler({}, res, next));
+
+    expect(next).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('actuatorPlugin', () => {
@@ -346,6 +374,7 @@ describe('actuatorPlugin', () => {
       prometheus: { enabled: false, defaultMetrics: false },
       info: { enabled: false },
       metrics: { enabled: false },
+      dashboard: { enabled: false },
     });
 
     expect(fastify.routes).toEqual([{ method: 'GET', path: '/actuator' }]);
@@ -483,8 +512,8 @@ describe('actuatorPlugin custom endpoints', () => {
     expect(typeof handler).toBe('function');
 
     const reply = createFastifyReply();
-    await handler!({ query: {}, raw: {} }, reply);
-    expect(reply.body).toEqual({ status: 'ok', avgLag: 0 });
+    const result = await handler!({ query: {}, raw: {} }, reply);
+    expect(result).toEqual({ status: 'ok', avgLag: 0 });
   });
 
   test('respects POST method and contentType when registering Fastify routes', async () => {

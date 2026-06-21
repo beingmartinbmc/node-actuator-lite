@@ -9,6 +9,7 @@ export interface ParsedRequest {
   path: string;
   params: Record<string, string>;
   query: Record<string, string>;
+  body?: unknown;
   raw: IncomingMessage;
 }
 
@@ -16,6 +17,7 @@ export interface WrappedResponse {
   status(code: number): WrappedResponse;
   json(data: any): void;
   text(data: string): void;
+  html(data: string): void;
   raw: ServerResponse;
 }
 
@@ -91,6 +93,9 @@ export class ActuatorServer {
   async stop(): Promise<void> {
     return new Promise((resolve) => {
       if (!this.server) return resolve();
+      // Forcibly close idle keep-alive sockets so shutdown can't hang (Node 18.2+).
+      const closeAll = (this.server as unknown as { closeAllConnections?: () => void }).closeAllConnections;
+      if (typeof closeAll === 'function') closeAll.call(this.server);
       this.server.close(() => resolve());
     });
   }
@@ -167,6 +172,10 @@ export class ActuatorServer {
       },
       text(data: string) {
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.end(data);
+      },
+      html(data: string) {
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.end(data);
       },
     };

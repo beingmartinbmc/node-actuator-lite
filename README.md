@@ -7,6 +7,10 @@
 
 Spring Boot Actuator for Node.js — lightweight monitoring endpoints with a single dependency.
 
+<p align="center">
+  <img src="./assets/banner.png" alt="node-actuator-lite — Spring Boot Actuator for Node.js" width="900" />
+</p>
+
 ## Why?
 
 If you're coming from Spring Boot, you expect `/actuator/health`, `/actuator/env`, and `/actuator/prometheus` out of the box. This library gives you exactly that for Node.js — **one dependency, zero config, works with any framework or serverless**.

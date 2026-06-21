@@ -22,101 +22,49 @@ export async function actuatorPlugin(
   const opts: ActuatorOptions = { ...options, serverless: true };
   const actuator = new NodeActuator(opts);
   const basePath = opts.basePath ?? '/actuator';
-  const enabled = {
-    health: opts.health?.enabled ?? true,
-    env: opts.env?.enabled ?? true,
-    threadDump: opts.threadDump?.enabled ?? true,
-    heapDump: opts.heapDump?.enabled ?? true,
-    prometheus: opts.prometheus?.enabled ?? true,
-    info: opts.info?.enabled ?? true,
-    metrics: opts.metrics?.enabled ?? true,
-  };
 
   // Decorate fastify instance so users can access the actuator
   if (!fastify.hasDecorator('actuator')) {
     fastify.decorate('actuator', actuator);
   }
 
-  // Discovery
-  fastify.get(basePath, async () => actuator.discovery());
+  // Register every endpoint from the shared table (built-in + custom, including
+  // ecosystem-registered global endpoints). Auth and content-type handling are
+  // delegated to the actuator's shared dispatch so all transports stay in sync.
+  for (const descriptor of actuator.listEndpoints()) {
+    // '/' is the discovery root → mount at basePath itself.
+    const route = descriptor.path === '/' ? basePath : `${basePath}${descriptor.path}`;
 
-  // Health
-  if (enabled.health) {
-    fastify.get(`${basePath}/health`, async (req: any, reply: any) => {
-      const result = await actuator.getHealth(req.query?.showDetails);
-      reply.code(result.status === 'UP' ? 200 : 503).send(result);
-    });
-
-    fastify.get(`${basePath}/health/:name`, async (req: any, reply: any) => {
-      const name: string = (req.params as any).name;
-      const group = await actuator.getHealthGroup(name);
-      if (group) return reply.code(group.status === 'UP' ? 200 : 503).send(group);
-      const comp = await actuator.getHealthComponent(name);
-      if (comp) return reply.code(comp.status === 'UP' ? 200 : 503).send(comp);
-      reply.code(404).send({ error: `Health component '${name}' not found` });
-    });
-  }
-
-  // Environment
-  if (enabled.env) {
-    fastify.get(`${basePath}/env`, async () => actuator.getEnv());
-
-    fastify.get(`${basePath}/env/:name`, async (req: any, reply: any) => {
-      const name: string = (req.params as any).name;
-      const v = actuator.getEnvVariable(name);
-      if (!v) return reply.code(404).send({ error: `Variable '${name}' not found` });
-      return v;
-    });
-  }
-
-  // Thread dump
-  if (enabled.threadDump) {
-    fastify.get(`${basePath}/threaddump`, async () => actuator.getThreadDump());
-  }
-
-  // Heap dump
-  if (enabled.heapDump) {
-    fastify.post(`${basePath}/heapdump`, async () => actuator.getHeapDump());
-  }
-
-  // Prometheus
-  if (enabled.prometheus) {
-    fastify.get(`${basePath}/prometheus`, async (_req: any, reply: any) => {
-      reply.type('text/plain; charset=utf-8').send(await actuator.getPrometheus());
-    });
-  }
-
-  if (enabled.info) {
-    fastify.get(`${basePath}/info`, async () => actuator.getInfoAsync());
-  }
-
-  if (enabled.metrics) {
-    fastify.get(`${basePath}/metrics`, async () => actuator.getMetrics());
-  }
-
-  // Custom endpoints — including any registered globally via
-  // `registerEndpoint(...)` before the plugin was registered (e.g. by
-  // `node-eventloop-watchdog` when both packages are wired together).
-  // Each is mounted as a Fastify route under `${basePath}/${id}` so the
-  // discovery output, the request router, and the actuator's
-  // `invokeEndpoint` lookup all stay in sync.
-  for (const endpoint of (actuator as any).customEndpoints.values()) {
-    const method = endpoint.method as 'GET' | 'POST';
-    const route = `${basePath}/${endpoint.id}`;
     const handler = async (req: any, reply: any) => {
-      const result = await endpoint.handler({
-        method,
-        path: `/${endpoint.id}`,
-        query: req.query,
-        raw: req.raw,
+      const params: Record<string, string> = (req && req.params) || {};
+      const query: Record<string, string> = (req && req.query) || {};
+      const result = await actuator.runDescriptor(descriptor, {
+        method: descriptor.method,
+        subPath: descriptor.path,
+        query,
+        params,
+        body: req && req.body,
+        raw: req && req.raw,
       });
-      if (endpoint.contentType === 'text') {
-        reply.type('text/plain; charset=utf-8').send(String(result));
-        return;
+
+      // Text payloads (e.g. Prometheus) need an explicit content type.
+      if (result.contentType === 'text') {
+        return reply.type('text/plain; charset=utf-8').code(result.status).send(String(result.body));
       }
-      reply.send(result);
+      // HTML payloads (e.g. dashboard).
+      if (result.contentType === 'html') {
+        return reply.type('text/html; charset=utf-8').code(result.status).send(String(result.body));
+      }
+      // Non-200 statuses must be set on the reply.
+      if (result.status !== 200) {
+        return reply.code(result.status).send(result.body);
+      }
+      // 200 JSON: return the body directly (idiomatic Fastify) so simple
+      // handlers work even without a reply object.
+      return result.body;
     };
-    if (method === 'POST') {
+
+    if (descriptor.method === 'POST') {
       fastify.post(route, handler);
     } else {
       fastify.get(route, handler);
