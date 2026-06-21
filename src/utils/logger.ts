@@ -9,8 +9,18 @@ export const LOG_LEVELS = {
 
 export type LogLevel = keyof typeof LOG_LEVELS;
 
-class Logger {
+/** Minimal logger contract consumers can implement to plug in pino/winston/etc. */
+export interface LoggerLike {
+  trace(msg: string, data?: unknown): void;
+  debug(msg: string, data?: unknown): void;
+  info(msg: string, data?: unknown): void;
+  warn(msg: string, data?: unknown): void;
+  error(msg: string, data?: unknown): void;
+}
+
+class Logger implements LoggerLike {
   private level: number;
+  private delegate: LoggerLike | null = null;
 
   constructor() {
     const envLevel = (process.env['ACTUATOR_LOG_LEVEL'] || 'WARN').toUpperCase() as LogLevel;
@@ -21,7 +31,21 @@ class Logger {
     this.level = LOG_LEVELS[level];
   }
 
-  private log(level: LogLevel, msg: string, data?: any): void {
+  /**
+   * Route all log output through a custom logger. Pass `null` to restore the
+   * built-in JSON console logger.
+   */
+  setDelegate(delegate: LoggerLike | null): void {
+    this.delegate = delegate;
+  }
+
+  private log(level: LogLevel, msg: string, data?: unknown): void {
+    if (this.delegate) {
+      const fn = level === 'SILENT' ? undefined : this.delegate[lowerLevel(level)];
+      if (fn) fn.call(this.delegate, msg, data);
+      return;
+    }
+
     if (LOG_LEVELS[level] < this.level) return;
 
     const entry = {
@@ -40,11 +64,24 @@ class Logger {
     }
   }
 
-  trace(msg: string, data?: any): void { this.log('TRACE', msg, data); }
-  debug(msg: string, data?: any): void { this.log('DEBUG', msg, data); }
-  info(msg: string, data?: any): void  { this.log('INFO', msg, data); }
-  warn(msg: string, data?: any): void  { this.log('WARN', msg, data); }
-  error(msg: string, data?: any): void { this.log('ERROR', msg, data); }
+  trace(msg: string, data?: unknown): void { this.log('TRACE', msg, data); }
+  debug(msg: string, data?: unknown): void { this.log('DEBUG', msg, data); }
+  info(msg: string, data?: unknown): void  { this.log('INFO', msg, data); }
+  warn(msg: string, data?: unknown): void  { this.log('WARN', msg, data); }
+  error(msg: string, data?: unknown): void { this.log('ERROR', msg, data); }
+}
+
+function lowerLevel(level: Exclude<LogLevel, 'SILENT'>): keyof LoggerLike;
+function lowerLevel(level: LogLevel): keyof LoggerLike | undefined;
+function lowerLevel(level: LogLevel): keyof LoggerLike | undefined {
+  switch (level) {
+    case 'TRACE': return 'trace';
+    case 'DEBUG': return 'debug';
+    case 'INFO': return 'info';
+    case 'WARN': return 'warn';
+    case 'ERROR': return 'error';
+    default: return undefined;
+  }
 }
 
 export const logger = new Logger();
