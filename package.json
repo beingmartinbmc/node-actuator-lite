@@ -57,6 +57,16 @@
       "require": "./dist/middleware/fastify.js",
       "default": "./dist/middleware/fastify.js"
     },
+    "./middleware/koa": {
+      "types": "./dist/middleware/koa.d.ts",
+      "require": "./dist/middleware/koa.js",
+      "default": "./dist/middleware/koa.js"
+    },
+    "./middleware/http": {
+      "types": "./dist/middleware/http.d.ts",
+      "require": "./dist/middleware/http.js",
+      "default": "./dist/middleware/http.js"
+    },
     "./dist/*": "./dist/*",
     "./package.json": "./package.json"
   },
@@ -86,6 +96,6 @@
     "typescript": "^5.3.3"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=18.15.0"
   }
 }

@@ -20,6 +20,7 @@ function makeConfig(
   return {
     enabled: true,
     outputDir: TEST_OUTPUT_DIR,
+    minIntervalMs: 0,
     ...overrides,
   };
 }

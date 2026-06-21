@@ -20,11 +20,13 @@ export class EnvironmentCollector {
   private patterns: string[];
   private additional: string[];
   private replacement: string;
+  private allowlist: string[] | undefined;
 
   constructor(config: ResolvedActuatorOptions['env']) {
     this.patterns = config.mask.patterns;
     this.additional = config.mask.additional;
     this.replacement = config.mask.replacement;
+    this.allowlist = config.mask.allowlist;
   }
 
   // ---------------------------------------------------------------------------
@@ -46,6 +48,8 @@ export class EnvironmentCollector {
   variable(name: string): { name: string; value: string } | null {
     const raw = process.env[name];
     if (raw === undefined) return null;
+    // Allowlist mode: variables not on the list are treated as non-existent.
+    if (this.allowlist && !this.allowlist.includes(name)) return null;
     return {
       name,
       value: this.shouldMask(name) ? this.replacement : raw,
@@ -86,6 +90,9 @@ export class EnvironmentCollector {
 
     for (const [key, val] of Object.entries(process.env)) {
       if (val === undefined) continue;
+      // Allowlist mode: omit the variable entirely (including its name) unless
+      // explicitly allowed. This avoids leaking the set of configured keys.
+      if (this.allowlist && !this.allowlist.includes(key)) continue;
       properties[key] = {
         value: this.shouldMask(key) ? this.replacement : val,
       };
