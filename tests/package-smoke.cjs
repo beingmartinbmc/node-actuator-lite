@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const root = require('node-actuator-lite');
 const express = require('node-actuator-lite/middleware/express');
 const fastify = require('node-actuator-lite/middleware/fastify');
+const koa = require('node-actuator-lite/middleware/koa');
+const http = require('node-actuator-lite/middleware/http');
 const deepRoot = require('node-actuator-lite/dist/index.js');
 const deepExpress = require('node-actuator-lite/dist/middleware/express.js');
 
@@ -11,6 +13,8 @@ assert.equal(typeof root.actuatorMiddleware, 'function');
 assert.equal(typeof root.actuatorPlugin, 'function');
 assert.equal(typeof express.actuatorMiddleware, 'function');
 assert.equal(typeof fastify.actuatorPlugin, 'function');
+assert.equal(typeof koa.actuatorKoa, 'function');
+assert.equal(typeof http.actuatorHttp, 'function');
 assert.equal(typeof deepRoot.NodeActuator, 'function');
 assert.equal(typeof deepExpress.actuatorMiddleware, 'function');
 
@@ -28,6 +32,7 @@ assert.deepEqual(Object.keys(actuator.discovery()._links), [
   'health-component',
   'info',
   'metrics',
+  'dashboard',
 ]);
 
 console.log('Package smoke test passed.');
