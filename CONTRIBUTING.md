@@ -18,7 +18,7 @@ npm run test:package
 - Add or update tests for public API changes.
 - Update `README.md`, `USAGE.md`, or `CHANGELOG.md` when behavior changes.
 - Avoid adding runtime dependencies unless they are essential for actuator behavior.
-- Treat `/env`, `/threaddump`, and `/heapdump` changes as security-sensitive.
+- Treat `/env`, `/threaddump`, `/heapdump`, and `/loggers` changes as security-sensitive.
 
 ## Release Checks
 

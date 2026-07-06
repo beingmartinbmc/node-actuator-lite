@@ -7,6 +7,7 @@ export { NodeActuator } from './core/Actuator';
 // Types
 export type {
   ActuatorOptions,
+  ActuatorPreset,
   HealthConfig,
   HealthIndicatorRegistration,
   HealthIndicatorResult,
@@ -38,6 +39,8 @@ export { EnvironmentCollector } from './collectors/EnvironmentCollector';
 export { PrometheusCollector } from './collectors/PrometheusCollector';
 export { ThreadDumpCollector } from './collectors/ThreadDumpCollector';
 export { HeapDumpCollector } from './collectors/HeapDumpCollector';
+export { LoggersCollector, PinoLoggerAdapter, WinstonLoggerAdapter, BunyanLoggerAdapter } from './collectors/LoggersCollector';
+export type { LoggerAdapter, LoggerLevel, LoggerInfo, LoggersResponse } from './collectors/LoggersCollector';
 
 // Middleware
 export { actuatorMiddleware } from './middleware/express';

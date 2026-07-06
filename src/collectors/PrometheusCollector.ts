@@ -13,17 +13,22 @@ type AnyMetric = Counter | Gauge | Histogram | Summary;
 
 export class PrometheusCollector {
   private registry: Registry;
+  private prefix: string;
   private customMetrics: Map<string, AnyMetric> = new Map();
 
   constructor(config: ResolvedActuatorOptions['prometheus']) {
-    this.registry = new Registry();
+    // Allow injection of an external Registry instance for seamless integration
+    // with existing prom-client setups, avoiding global registry collisions.
+    this.registry = config.registry ?? new Registry();
 
-    if (config.prefix) {
-      this.registry.setDefaultLabels({ prefix: config.prefix });
-    }
+    // Prometheus convention: prefix is prepended to metric names, NOT used as a label.
+    this.prefix = config.prefix || '';
 
     if (config.defaultMetrics) {
-      collectDefaultMetrics({ register: this.registry });
+      collectDefaultMetrics({
+        register: this.registry,
+        ...(this.prefix ? { prefix: this.prefix } : {}),
+      });
     }
 
     for (const def of config.customMetrics) {
@@ -55,8 +60,11 @@ export class PrometheusCollector {
     const existing = this.customMetrics.get(def.name);
     if (existing) return existing;
 
+    // Prepend the configured prefix to the metric name (Prometheus convention).
+    const prefixedName = this.prefix ? `${this.prefix}${def.name}` : def.name;
+
     const opts: any = {
-      name: def.name,
+      name: prefixedName,
       help: def.help,
       labelNames: def.labels ?? [],
       registers: [this.registry],
@@ -86,11 +94,12 @@ export class PrometheusCollector {
     return metric;
   }
 
-  /** Remove a custom metric by name. */
+  /** Remove a custom metric by name (use the original un-prefixed name). */
   removeMetric(name: string): boolean {
     const m = this.customMetrics.get(name);
     if (!m) return false;
-    this.registry.removeSingleMetric(name);
+    const prefixedName = this.prefix ? `${this.prefix}${name}` : name;
+    this.registry.removeSingleMetric(prefixedName);
     this.customMetrics.delete(name);
     return true;
   }

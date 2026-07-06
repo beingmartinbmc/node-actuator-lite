@@ -1,15 +1,27 @@
 import { existsSync, rmSync } from 'fs';
 import { join } from 'path';
+import { Readable } from 'stream';
 import v8 from 'v8';
 import { HeapDumpCollector } from '../src/collectors/HeapDumpCollector';
 import type { ResolvedActuatorOptions } from '../src/core/types';
 
 const TEST_OUTPUT_DIR = join(__dirname, '..', '.test-heapdumps');
 
-// Mock v8.writeHeapSnapshot so tests don't generate real multi-MB snapshots
+// Mock v8.getHeapSnapshot to return a readable stream with mock data
+jest.spyOn(v8, 'getHeapSnapshot').mockImplementation(() => {
+  const stream = new Readable({
+    read() {
+      this.push('{"mock":"heapdump-stream"}');
+      this.push(null);
+    },
+  });
+  return stream as any;
+});
+
+// Mock v8.writeHeapSnapshot as sync fallback
 jest.spyOn(v8, 'writeHeapSnapshot').mockImplementation((filePath?: string) => {
   if (filePath) {
-    require('fs').writeFileSync(filePath, '{"mock":"heapdump"}');
+    require('fs').writeFileSync(filePath, '{"mock":"heapdump-sync"}');
   }
   return filePath ?? 'mock.heapsnapshot';
 });
@@ -99,7 +111,10 @@ describe('HeapDumpCollector', () => {
     expect(existsSync(result.filePath)).toBe(true);
   });
 
-  test('fallback is used when v8.writeHeapSnapshot throws', async () => {
+  test('fallback is used when both getHeapSnapshot and writeHeapSnapshot throw', async () => {
+    (v8.getHeapSnapshot as jest.Mock).mockImplementationOnce(() => {
+      throw new Error('stream not supported');
+    });
     (v8.writeHeapSnapshot as jest.Mock).mockImplementationOnce(() => {
       throw new Error('not supported');
     });

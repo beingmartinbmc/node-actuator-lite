@@ -4,7 +4,37 @@ All notable changes to this project will be documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning.
 
-## Unreleased
+## 3.4.0 - 2026-07-06
+
+### Added
+
+- `preset: 'production'` safety preset that disables `/env`, `/threaddump`, `/heapdump`, `/loggers`, and `/dashboard`, and hides health details, by default. Must be set explicitly — it is never inferred from `NODE_ENV`.
+- `/actuator/loggers` (list) and `/actuator/loggers/{name}` (get/change level) endpoints, with `PinoLoggerAdapter`, `WinstonLoggerAdapter`, and `BunyanLoggerAdapter` for managing external loggers alongside the built-in `ROOT` logger.
+- `prometheus.registry` option to inject an existing `prom-client` `Registry` instead of creating a new one.
+- Event Loop Utilization (ELU) reported at `threaddump.eventLoop.utilization` (idle/active/utilization plus the delta since the previous call).
+- Smart connection-string masking for `/actuator/env`: password-bearing URIs (Postgres, MySQL, MongoDB, Redis, AMQP, etc.) have only the credential masked, keeping host, port, and database visible.
+- CI `release-checks` job (typecheck, build, package smoke test, production dependency audit, pack dry run) runs on every PR.
+
+### Changed
+
+- `/actuator` dispatch uses a cached, pre-compiled endpoint table instead of rebuilding routes and regexes on every request.
+- `HealthCollector` stores indicators in a `Map` instead of an array for O(1) lookups; health-group checks now run in parallel.
+- Heap dumps are generated asynchronously via a streamed `v8.getHeapSnapshot()` instead of the event-loop-blocking `v8.writeHeapSnapshot()`, with a synchronous fallback if streaming fails.
+- `prometheus.prefix` is now prepended to metric names (the Prometheus convention) instead of being applied as a registry default label.
+- Express, Koa, and `node:http` adapters use a strict base-path match so `/actuator` no longer matches lookalike paths such as `/actuatorish`.
+- Express, Fastify, Koa, and `node:http` adapters send `Cache-Control: no-store` on every actuator response.
+- The built-in dashboard pauses its polling loop while the browser tab is hidden.
+- A warning is now logged when `NODE_ENV=production` is detected without an explicit `preset`, and another when sensitive endpoints are enabled without an `auth` callback.
+
+### Fixed
+
+- `POST /actuator/loggers/{name}` now works on the standalone server and the `node:http` adapter. Both now parse JSON request bodies — previously `ctx.body` was always `undefined` outside the Express/Fastify/Koa adapters, so every request failed with `configuredLevel is required`.
+- `LoggerLevel.OFF` now truly silences Winston (`silent: true`) and Bunyan (level set above `FATAL`) instead of mapping to `error`/`fatal`, which still emitted logs at severe levels.
+
+### Documentation
+
+- Documented the `loggers`, `preset`, and `prometheus.registry` options, connection-string masking, and Event Loop Utilization across `README.md` and `USAGE.md`; updated `SECURITY.md` and `CONTRIBUTING.md` to list `/loggers` alongside the other sensitive endpoints.
+- The README banner now loads from a raw GitHub URL instead of a repo-relative path, so it renders correctly on npmjs.com; the image is no longer included in the published npm package.
 
 ## 3.3.1 - 2026-06-21
 

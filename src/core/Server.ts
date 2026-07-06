@@ -1,6 +1,7 @@
 import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
 import { URL } from 'url';
 import { logger } from '../utils/logger';
+import { readJsonBody } from '../utils/readJsonBody';
 
 export type RouteHandler = (req: ParsedRequest, res: WrappedResponse) => void | Promise<void>;
 
@@ -54,15 +55,25 @@ export class ActuatorServer {
 
   private addRoute(method: string, path: string, handler: RouteHandler): void {
     const paramNames: string[] = [];
-    const regexStr = path.replace(/:([^/]+)/g, (_match, name) => {
-      paramNames.push(name);
-      return '([^/]+)';
-    });
+    // Split on :param segments and escape regex metacharacters in literal parts.
+    const segments = path.split(/(:([^/]+))/);
+    let regexStr = '';
+    for (let i = 0; i < segments.length; i += 3) {
+      const literal = segments[i];
+      if (literal) {
+        regexStr += literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      }
+      const paramName = segments[i + 2];
+      if (paramName) {
+        paramNames.push(paramName);
+        regexStr += '([^/]+)';
+      }
+    }
     this.routes.push({
       method,
       pathPattern: path,
       paramNames,
-      regex: new RegExp(`^${regexStr}$`),
+      regex: new RegExp('^' + regexStr + '$'),
       handler,
     });
   }
@@ -109,10 +120,10 @@ export class ActuatorServer {
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const { pathname, query } = this.parseUrl(req.url || '/');
 
-    // Strip basePath prefix
-    let path = pathname;
-    if (path.startsWith(this.basePath)) {
-      path = path.slice(this.basePath.length) || '/';
+    // Strip basePath prefix using strict boundary check.
+    let path: string;
+    if (pathname === this.basePath || pathname.startsWith(this.basePath + '/')) {
+      path = pathname.slice(this.basePath.length) || '/';
     } else {
       // Not under basePath — 404
       this.send404(res, req.method || 'GET', pathname);
@@ -121,6 +132,7 @@ export class ActuatorServer {
 
     const method = req.method || 'GET';
     const wrapped = this.wrapResponse(res);
+    const body = await readJsonBody(req, method);
 
     for (const route of this.routes) {
       if (route.method !== method) continue;
@@ -132,7 +144,7 @@ export class ActuatorServer {
         params[name] = decodeURIComponent(match[i + 1]!);
       });
 
-      const parsed: ParsedRequest = { method, path, params, query, raw: req };
+      const parsed: ParsedRequest = { method, path, params, query, body, raw: req };
 
       try {
         await route.handler(parsed, wrapped);
@@ -168,14 +180,17 @@ export class ActuatorServer {
       },
       json(data: any) {
         res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Cache-Control', 'no-store');
         res.end(JSON.stringify(data));
       },
       text(data: string) {
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
         res.end(data);
       },
       html(data: string) {
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
         res.end(data);
       },
     };

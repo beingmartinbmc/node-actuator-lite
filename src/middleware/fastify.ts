@@ -47,6 +47,9 @@ export async function actuatorPlugin(
         raw: req && req.raw,
       });
 
+      // Operational endpoints must not be cached.
+      reply.header('Cache-Control', 'no-store');
+
       // Text payloads (e.g. Prometheus) need an explicit content type.
       if (result.contentType === 'text') {
         return reply.type('text/plain; charset=utf-8').code(result.status).send(String(result.body));

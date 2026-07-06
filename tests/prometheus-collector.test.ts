@@ -188,17 +188,18 @@ describe('PrometheusCollector', () => {
   // Prefix
   // ===========================================================================
 
-  test('prefix sets default labels', async () => {
+  test('prefix prepends to metric names', async () => {
     const pc = new PrometheusCollector(
       makeConfig({
-        prefix: 'myapp',
+        prefix: 'myapp_',
         customMetrics: [{ name: 'prefixed_counter', help: 'Prefixed', type: 'counter' }],
       }),
     );
     const c = pc.metric<Counter>('prefixed_counter')!;
     c.inc();
     const text = await pc.collect();
-    expect(text).toContain('prefix="myapp"');
+    // Prometheus convention: prefix is prepended to the metric name.
+    expect(text).toContain('myapp_prefixed_counter');
   });
 
   // ===========================================================================

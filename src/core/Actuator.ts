@@ -17,6 +17,7 @@ import { EnvironmentCollector, DEFAULT_MASK_PATTERNS } from '../collectors/Envir
 import { PrometheusCollector } from '../collectors/PrometheusCollector';
 import { ThreadDumpCollector } from '../collectors/ThreadDumpCollector';
 import { HeapDumpCollector, HeapDumpThrottledError } from '../collectors/HeapDumpCollector';
+import { LoggersCollector } from '../collectors/LoggersCollector';
 import { renderDashboard } from './dashboard';
 import type {
   ActuatorOptions,
@@ -40,12 +41,20 @@ export class NodeActuator {
   private server?: ActuatorServer;
   private customEndpoints: Map<string, CustomEndpointRegistration> = new Map();
 
+  // Cached endpoint table + compiled regexes — rebuilt only when endpoints change.
+  private cachedEndpointTable: Array<{
+    descriptor: EndpointDescriptor;
+    regex: RegExp;
+    paramNames: string[];
+  }> | null = null;
+
   // Collectors — exposed as readonly for advanced usage
   readonly health: HealthCollector;
   readonly env: EnvironmentCollector;
   readonly prometheus: PrometheusCollector;
   readonly threadDump: ThreadDumpCollector;
   readonly heapDump: HeapDumpCollector;
+  readonly loggers: LoggersCollector;
 
   constructor(options: ActuatorOptions = {}) {
     this.opts = this.resolve(options);
@@ -72,6 +81,7 @@ export class NodeActuator {
     this.prometheus = new PrometheusCollector(this.opts.prometheus);
     this.threadDump = new ThreadDumpCollector();
     this.heapDump = new HeapDumpCollector(this.opts.heapDump);
+    this.loggers = new LoggersCollector();
     NodeActuator.instances.add(this);
     for (const endpoint of NodeActuator.globalEndpoints.values()) {
       this.registerEndpoint(endpoint);
@@ -149,6 +159,10 @@ export class NodeActuator {
     }
     if (this.opts.metrics.enabled) {
       links['metrics'] = { href: `${base}/metrics` };
+    }
+    if (this.opts.loggers.enabled) {
+      links['loggers'] = { href: `${base}/loggers` };
+      links['loggers-name'] = { href: `${base}/loggers/{name}`, templated: true };
     }
     if (this.opts.dashboard.enabled) {
       links['dashboard'] = { href: `${base}/dashboard` };
@@ -240,6 +254,7 @@ export class NodeActuator {
     const normalized = this.normalizeEndpointId(endpoint.id);
     const registered = { ...endpoint, id: normalized, method: endpoint.method ?? 'GET' };
     this.customEndpoints.set(this.endpointKey(registered.method, normalized), registered);
+    this.invalidateEndpointCache();
 
     if (this.server) {
       this.registerDescriptorRoute(this.toDescriptor(registered));
@@ -274,7 +289,7 @@ export class NodeActuator {
    * this list so status codes, content types, and auth never diverge.
    */
   listEndpoints(): EndpointDescriptor[] {
-    return [...this.buildBuiltinEndpoints(), ...this.customEndpointDescriptors()];
+    return this.getCompiledEndpoints().map((e) => e.descriptor);
   }
 
   /**
@@ -292,21 +307,47 @@ export class NodeActuator {
   /**
    * Match a normalised request against the endpoint table and run it (with auth).
    * Returns `null` when no endpoint matches (caller decides 404 / passthrough).
+   *
+   * Uses a pre-compiled endpoint table with cached RegExp objects to avoid
+   * per-request array allocations and regex compilation.
    */
   async dispatch(ctx: ActuatorRequestContext): Promise<ActuatorRouteResult | null> {
     const subPath = ctx.subPath === '' ? '/' : ctx.subPath;
-    for (const descriptor of this.listEndpoints()) {
-      if (descriptor.method !== ctx.method) continue;
-      const { regex, paramNames } = compilePath(descriptor.path);
-      const match = subPath.match(regex);
+    for (const entry of this.getCompiledEndpoints()) {
+      if (entry.descriptor.method !== ctx.method) continue;
+      const match = subPath.match(entry.regex);
       if (!match) continue;
       const params: Record<string, string> = {};
-      paramNames.forEach((name, i) => {
+      entry.paramNames.forEach((name, i) => {
         params[name] = decodeURIComponent(match[i + 1]!);
       });
-      return runEndpoint(descriptor, { ...ctx, subPath, params }, this.opts.auth);
+      return runEndpoint(entry.descriptor, { ...ctx, subPath, params }, this.opts.auth);
     }
     return null;
+  }
+
+  /**
+   * Returns the compiled endpoint table. Builds it lazily and caches it.
+   * Invalidated whenever registerEndpoint() is called.
+   */
+  private getCompiledEndpoints(): Array<{
+    descriptor: EndpointDescriptor;
+    regex: RegExp;
+    paramNames: string[];
+  }> {
+    if (!this.cachedEndpointTable) {
+      const descriptors = [...this.buildBuiltinEndpoints(), ...this.customEndpointDescriptors()];
+      this.cachedEndpointTable = descriptors.map((descriptor) => {
+        const { regex, paramNames } = compilePath(descriptor.path);
+        return { descriptor, regex, paramNames };
+      });
+    }
+    return this.cachedEndpointTable;
+  }
+
+  /** Invalidate the cached endpoint table (called when endpoints change). */
+  private invalidateEndpointCache(): void {
+    this.cachedEndpointTable = null;
   }
 
   private buildBuiltinEndpoints(): EndpointDescriptor[] {
@@ -395,6 +436,41 @@ export class NodeActuator {
       endpoints.push({ method: 'GET', path: '/metrics', handle: () => json(this.getMetrics()) });
     }
 
+    if (this.opts.loggers.enabled) {
+      endpoints.push({
+        method: 'GET',
+        path: '/loggers',
+        handle: () => json(this.loggers.collect()),
+      });
+      endpoints.push({
+        method: 'GET',
+        path: '/loggers/:name',
+        handle: (ctx) => {
+          const name = ctx.params['name'] ?? '';
+          const info = this.loggers.getLogger(name);
+          if (!info) return json({ error: 'Logger not found' }, 404);
+          return json(info);
+        },
+      });
+      endpoints.push({
+        method: 'POST',
+        path: '/loggers/:name',
+        handle: (ctx) => {
+          const name = ctx.params['name'] ?? '';
+          const body = ctx.body as { configuredLevel?: string } | undefined;
+          const level = body?.configuredLevel;
+          if (!level) return json({ error: 'configuredLevel is required' }, 400);
+          const validLevels = ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'OFF'];
+          if (!validLevels.includes(level.toUpperCase())) {
+            return json({ error: `Invalid level: ${level}. Valid: ${validLevels.join(', ')}` }, 400);
+          }
+          const ok = this.loggers.setLevel(name, level.toUpperCase() as any);
+          if (!ok) return json({ error: 'Failed to set level' }, 500);
+          return json({ status: 'ok', logger: name, level: level.toUpperCase() });
+        },
+      });
+    }
+
     return endpoints;
   }
 
@@ -465,7 +541,23 @@ export class NodeActuator {
   // ===========================================================================
 
   private resolve(o: ActuatorOptions): ResolvedActuatorOptions {
-    return {
+    // `preset` must be explicit. Auto-flipping endpoint defaults from NODE_ENV
+    // alone would silently disable endpoints for existing deployments on
+    // upgrade — instead we only *warn* below when NODE_ENV=production is seen
+    // without an explicit preset, nudging towards preset: 'production'.
+    const preset = o.preset;
+    const isProd = preset === 'production';
+    const nodeEnvIsProdWithoutPreset = preset === undefined && process.env['NODE_ENV'] === 'production';
+
+    // Production defaults: sensitive endpoints off, health details hidden.
+    const prodEnvEnabled = isProd ? false : true;
+    const prodThreadDumpEnabled = isProd ? false : true;
+    const prodHeapDumpEnabled = isProd ? false : true;
+    const prodLoggersEnabled = isProd ? false : true;
+    const prodDashboardEnabled = isProd ? false : true;
+    const prodShowDetails: 'never' | 'always' = isProd ? 'never' : 'always';
+
+    const resolved: ResolvedActuatorOptions = {
       port: o.port ?? 0,
       basePath: o.basePath ?? '/actuator',
       serverless: o.serverless ?? false,
@@ -483,7 +575,7 @@ export class NodeActuator {
 
       health: {
         enabled: o.health?.enabled ?? true,
-        showDetails: o.health?.showDetails ?? 'always',
+        showDetails: o.health?.showDetails ?? prodShowDetails,
         timeout: o.health?.timeout ?? 5000,
         indicators: {
           diskSpace: {
@@ -501,7 +593,7 @@ export class NodeActuator {
       },
 
       env: {
-        enabled: o.env?.enabled ?? true,
+        enabled: o.env?.enabled ?? prodEnvEnabled,
         mask: {
           patterns: o.env?.mask?.patterns ?? [...DEFAULT_MASK_PATTERNS],
           additional: o.env?.mask?.additional ?? [],
@@ -511,11 +603,11 @@ export class NodeActuator {
       },
 
       threadDump: {
-        enabled: o.threadDump?.enabled ?? true,
+        enabled: o.threadDump?.enabled ?? prodThreadDumpEnabled,
       },
 
       heapDump: {
-        enabled: o.heapDump?.enabled ?? true,
+        enabled: o.heapDump?.enabled ?? prodHeapDumpEnabled,
         outputDir: o.heapDump?.outputDir ?? './heapdumps',
         minIntervalMs: o.heapDump?.minIntervalMs ?? 60000,
       },
@@ -525,14 +617,46 @@ export class NodeActuator {
         defaultMetrics: o.prometheus?.defaultMetrics ?? true,
         prefix: o.prometheus?.prefix ?? '',
         customMetrics: o.prometheus?.customMetrics ?? [],
+        ...(o.prometheus?.registry ? { registry: o.prometheus.registry } : {}),
       },
 
       dashboard: {
-        enabled: o.dashboard?.enabled ?? true,
+        enabled: o.dashboard?.enabled ?? prodDashboardEnabled,
+      },
+
+      loggers: {
+        enabled: o.loggers?.enabled ?? prodLoggersEnabled,
       },
 
       endpoints: o.endpoints ?? [],
     };
+
+    if (nodeEnvIsProdWithoutPreset) {
+      logger.warn(
+        `NODE_ENV=production detected but no 'preset' was set — endpoints keep their ` +
+        `configured defaults (nothing was auto-disabled). Set preset: 'production' to ` +
+        `disable sensitive endpoints (/env, /threaddump, /heapdump, /loggers, /dashboard) ` +
+        `and hide health details by default.`,
+      );
+    }
+
+    // Emit loud warnings when sensitive endpoints are enabled without auth.
+    if (!resolved.auth) {
+      const sensitiveEndpoints: string[] = [];
+      if (resolved.env.enabled) sensitiveEndpoints.push('/env');
+      if (resolved.threadDump.enabled) sensitiveEndpoints.push('/threaddump');
+      if (resolved.heapDump.enabled) sensitiveEndpoints.push('/heapdump');
+      if (resolved.loggers.enabled) sensitiveEndpoints.push('/loggers');
+
+      if (sensitiveEndpoints.length > 0) {
+        logger.warn(
+          `Sensitive endpoints enabled without auth: ${sensitiveEndpoints.join(', ')}. ` +
+          `Set an 'auth' callback or use preset: 'production' to disable them by default.`,
+        );
+      }
+    }
+
+    return resolved;
   }
 
   private endpointKey(method: string | undefined, id: string): string {

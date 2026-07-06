@@ -1,7 +1,18 @@
 import { NodeActuator } from '../core/Actuator';
 import type { ActuatorOptions } from '../core/types';
+import { readJsonBody } from '../utils/readJsonBody';
 
 type HttpHandler = (req: any, res: any, next?: (err?: any) => void) => void;
+
+/**
+ * Strict base-path check: returns true when `url` is exactly `base` or starts
+ * with `base` followed by '/' or '?'. Prevents '/actuator' matching '/actuatorish'.
+ */
+function isUnderBasePath(url: string, base: string): boolean {
+  if (!url.startsWith(base)) return false;
+  const next = url[base.length];
+  return next === undefined || next === '/' || next === '?';
+}
 
 export interface ActuatorHttpResult {
   /**
@@ -40,9 +51,21 @@ export function actuatorHttp(options: ActuatorOptions = {}): ActuatorHttpResult 
   async function dispatch(req: any, res: any, next?: (err?: any) => void): Promise<void> {
     const rawUrl: string = req.url || '';
     const method: string = (req.method || 'GET').toUpperCase();
-    const [pathname = '', queryString = ''] = rawUrl.split('?');
 
-    if (!pathname.startsWith(basePath)) {
+    // Use the URL constructor for robust pathname/query parsing.
+    let pathname: string;
+    let query: Record<string, string>;
+    try {
+      const parsed = new URL(rawUrl, 'http://localhost');
+      pathname = parsed.pathname;
+      query = {};
+      parsed.searchParams.forEach((v, k) => { query[k] = v; });
+    } catch {
+      pathname = rawUrl.split('?')[0] || '/';
+      query = {};
+    }
+
+    if (!isUnderBasePath(pathname, basePath)) {
       if (next) return next();
       res.statusCode = 404;
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -51,7 +74,7 @@ export function actuatorHttp(options: ActuatorOptions = {}): ActuatorHttpResult 
     }
 
     const subPath = pathname.slice(basePath.length) || '/';
-    const query = parseQuery(queryString);
+    const body = await readJsonBody(req, method);
 
     try {
       const result = await actuator.dispatch({
@@ -59,7 +82,7 @@ export function actuatorHttp(options: ActuatorOptions = {}): ActuatorHttpResult 
         subPath,
         query,
         params: {},
-        body: undefined,
+        body,
         raw: req,
       });
 
@@ -70,7 +93,9 @@ export function actuatorHttp(options: ActuatorOptions = {}): ActuatorHttpResult 
         return;
       }
 
+      // Operational endpoints must not be cached.
       res.statusCode = result.status;
+      res.setHeader('Cache-Control', 'no-store');
       if (result.contentType === 'text') {
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
         res.end(String(result.body));
@@ -91,19 +116,4 @@ export function actuatorHttp(options: ActuatorOptions = {}): ActuatorHttpResult 
   }
 
   return { handler, actuator };
-}
-
-function parseQuery(queryString: string): Record<string, string> {
-  const query: Record<string, string> = {};
-  if (!queryString) return query;
-  for (const pair of queryString.split('&')) {
-    if (!pair) continue;
-    const idx = pair.indexOf('=');
-    if (idx === -1) {
-      query[decodeURIComponent(pair)] = '';
-    } else {
-      query[decodeURIComponent(pair.slice(0, idx))] = decodeURIComponent(pair.slice(idx + 1));
-    }
-  }
-  return query;
 }

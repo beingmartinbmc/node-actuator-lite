@@ -32,6 +32,8 @@ assert.deepEqual(Object.keys(actuator.discovery()._links), [
   'health-component',
   'info',
   'metrics',
+  'loggers',
+  'loggers-name',
   'dashboard',
 ]);
 

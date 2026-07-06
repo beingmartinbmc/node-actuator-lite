@@ -1,7 +1,10 @@
 import v8 from 'v8';
+import { performance } from 'perf_hooks';
 import type { ThreadDumpResponse } from '../core/types';
 
 export class ThreadDumpCollector {
+  private previousELU: ReturnType<typeof performance.eventLoopUtilization> | null = null;
+
   collect(): ThreadDumpResponse {
     const cpuUsage = process.cpuUsage();
     const memoryUsage = process.memoryUsage();
@@ -25,6 +28,7 @@ export class ThreadDumpCollector {
       eventLoop: {
         activeHandles: this.getActiveHandles(),
         activeRequests: this.getActiveRequests(),
+        utilization: this.getEventLoopUtilization(),
       },
 
       workers: this.getWorkerThreads(),
@@ -69,6 +73,43 @@ export class ThreadDumpCollector {
       };
     } catch {
       return { count: 0, types: [] };
+    }
+  }
+
+  /**
+   * Event Loop Utilization via performance.eventLoopUtilization().
+   * Provides cumulative ELU and delta since the last call (useful for
+   * detecting event loop saturation — far more accurate than CPU usage
+   * for Node.js applications).
+   *
+   * idle + active = 1.0 (proportional)
+   * utilization ∈ [0, 1] — fraction of time the loop was NOT idle.
+   */
+  private getEventLoopUtilization(): {
+    idle: number;
+    active: number;
+    utilization: number;
+    delta: { idle: number; active: number; utilization: number } | null;
+  } {
+    try {
+      const currentELU = performance.eventLoopUtilization();
+      let delta: { idle: number; active: number; utilization: number } | null = null;
+
+      if (this.previousELU) {
+        const d = performance.eventLoopUtilization(currentELU, this.previousELU);
+        delta = { idle: d.idle, active: d.active, utilization: d.utilization };
+      }
+
+      this.previousELU = currentELU;
+
+      return {
+        idle: currentELU.idle,
+        active: currentELU.active,
+        utilization: currentELU.utilization,
+        delta,
+      };
+    } catch {
+      return { idle: 0, active: 0, utilization: 0, delta: null };
     }
   }
 

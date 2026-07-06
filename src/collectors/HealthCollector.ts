@@ -16,7 +16,7 @@ interface InternalIndicator {
 }
 
 export class HealthCollector {
-  private indicators: InternalIndicator[] = [];
+  private indicators: Map<string, InternalIndicator> = new Map();
   private config: ResolvedActuatorOptions['health'];
 
   constructor(config: ResolvedActuatorOptions['health']) {
@@ -51,7 +51,7 @@ export class HealthCollector {
 
   /** Get health for a specific component by name. */
   async component(name: string): Promise<HealthComponentResponse | null> {
-    const indicator = this.indicators.find((i) => i.name === name);
+    const indicator = this.indicators.get(name);
     if (!indicator) return null;
     return this.runIndicator(indicator);
   }
@@ -62,12 +62,18 @@ export class HealthCollector {
     if (!memberNames) return null;
 
     const components: Record<string, HealthComponentResponse> = {};
-    for (const name of memberNames) {
-      const indicator = this.indicators.find((i) => i.name === name);
-      if (indicator) {
-        components[name] = await this.runIndicator(indicator);
-      }
-    }
+    const timeout = this.config.timeout;
+
+    // Run group member indicators in parallel (same as runAllIndicators).
+    await Promise.all(
+      memberNames.map(async (name) => {
+        const indicator = this.indicators.get(name);
+        if (indicator) {
+          components[name] = await this.runIndicatorWithTimeout(indicator, timeout);
+        }
+      }),
+    );
+
     return {
       status: this.aggregateStatus(components),
       components,
@@ -76,12 +82,12 @@ export class HealthCollector {
 
   /** List all registered indicator names. */
   indicatorNames(): string[] {
-    return this.indicators.map((i) => i.name);
+    return [...this.indicators.keys()];
   }
 
   /** Dynamically add a custom health indicator at runtime. */
   addIndicator(reg: HealthIndicatorRegistration): void {
-    this.indicators.push({
+    this.indicators.set(reg.name, {
       name: reg.name,
       check: reg.check,
       critical: reg.critical ?? false,
@@ -90,9 +96,7 @@ export class HealthCollector {
 
   /** Remove a health indicator by name. */
   removeIndicator(name: string): boolean {
-    const before = this.indicators.length;
-    this.indicators = this.indicators.filter((i) => i.name !== name);
-    return this.indicators.length < before;
+    return this.indicators.delete(name);
   }
 
   // ---------------------------------------------------------------------------
@@ -103,7 +107,7 @@ export class HealthCollector {
     const { indicators, custom } = this.config;
 
     if (indicators.diskSpace.enabled) {
-      this.indicators.push({
+      this.indicators.set('diskSpace', {
         name: 'diskSpace',
         check: () => this.checkDiskSpace(),
         critical: true,
@@ -111,7 +115,7 @@ export class HealthCollector {
     }
 
     if (indicators.process.enabled) {
-      this.indicators.push({
+      this.indicators.set('process', {
         name: 'process',
         check: () => this.checkProcess(),
         critical: false,
@@ -119,7 +123,7 @@ export class HealthCollector {
     }
 
     for (const c of custom) {
-      this.indicators.push({
+      this.indicators.set(c.name, {
         name: c.name,
         check: c.check,
         critical: c.critical ?? false,
@@ -131,8 +135,9 @@ export class HealthCollector {
     const results: Record<string, HealthComponentResponse> = {};
     const timeout = this.config.timeout;
 
+    const entries = [...this.indicators.values()];
     await Promise.all(
-      this.indicators.map(async (ind) => {
+      entries.map(async (ind) => {
         results[ind.name] = await this.runIndicatorWithTimeout(ind, timeout);
       }),
     );
@@ -179,7 +184,7 @@ export class HealthCollector {
 
     // If any critical indicator is DOWN → overall DOWN
     for (const [name, comp] of entries) {
-      const ind = this.indicators.find((i) => i.name === name);
+      const ind = this.indicators.get(name);
       if (ind?.critical && comp.status === 'DOWN') return 'DOWN';
     }
 
@@ -223,9 +228,6 @@ export class HealthCollector {
   }
 
   private getDiskSpace(diskPath: string): { free: number; total: number } {
-    // fs.statfsSync is cross-platform and avoids shelling out (Node >= 18.15,
-    // which matches our supported engine range). No command execution means no
-    // command-injection surface from a user-supplied path.
     const statfs = (fs as unknown as {
       statfsSync?: (p: string) => { blocks: number; bsize: number; bavail: number };
     }).statfsSync;
