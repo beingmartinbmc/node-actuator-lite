@@ -3,6 +3,16 @@ import type { ActuatorOptions } from '../core/types';
 
 type ExpressMiddleware = (req: any, res: any, next: any) => void;
 
+/**
+ * Strict base-path check: returns true when `url` is exactly `base` or starts
+ * with `base` followed by '/' or '?'. Prevents '/actuator' matching '/actuatorish'.
+ */
+function isUnderBasePath(url: string, base: string): boolean {
+  if (!url.startsWith(base)) return false;
+  const next = url[base.length];
+  return next === undefined || next === '/' || next === '?';
+}
+
 export interface ActuatorMiddlewareResult {
   /** Mount this on your Express app: `app.use(result.handler)` */
   handler: ExpressMiddleware;
@@ -33,7 +43,9 @@ export function actuatorMiddleware(options: ActuatorOptions = {}): ActuatorMiddl
     const url: string = req.originalUrl || req.url || '';
     const method: string = (req.method || 'GET').toUpperCase();
 
-    if (!url.startsWith(basePath)) return next();
+    // Strict prefix match: url must be exactly basePath or basePath followed by
+    // '/' or '?'. This prevents '/actuator' matching '/actuatorish'.
+    if (!isUnderBasePath(url, basePath)) return next();
 
     const subPath = url.slice(basePath.length).split('?')[0] || '/';
     const query: Record<string, string> = req.query || {};
@@ -51,6 +63,9 @@ export function actuatorMiddleware(options: ActuatorOptions = {}): ActuatorMiddl
       if (!result) {
         return res.status(404).json({ error: 'Not found' });
       }
+
+      // Operational endpoints must not be cached.
+      res.set('Cache-Control', 'no-store');
 
       if (result.contentType === 'text') {
         res.set('Content-Type', 'text/plain; charset=utf-8');

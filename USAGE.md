@@ -15,6 +15,7 @@ Detailed usage examples for `node-actuator-lite` — a Spring Boot Actuator equi
 - [Thread Dump](#thread-dump)
 - [Heap Dump](#heap-dump)
 - [Prometheus Metrics](#prometheus-metrics)
+- [Loggers](#loggers)
 - [Express Integration](#express-integration)
 - [Fastify Integration](#fastify-integration)
 - [Kubernetes Probes](#kubernetes-probes)
@@ -36,9 +37,27 @@ await actuator.start();
 
 ## Production Safety
 
-Actuator data is useful because it is detailed, but that also makes some endpoints sensitive. Do not expose `/actuator/env`, `/actuator/threaddump`, or `/actuator/heapdump` on the public internet without authentication, network controls, or a temporary debugging process.
+Actuator data is useful because it is detailed, but that also makes some endpoints sensitive. Do not expose `/actuator/env`, `/actuator/threaddump`, `/actuator/heapdump`, or `/actuator/loggers` on the public internet without authentication, network controls, or a temporary debugging process.
 
-Use this baseline for internet-facing services:
+The simplest baseline is the built-in `preset: 'production'` option, which disables all of the above (plus `/dashboard`) and hides health details:
+
+```ts
+const actuator = new NodeActuator({
+  port: 8081,
+  preset: 'production',
+  auth: ({ raw }) => true, // replace with a real token/allowlist check
+  health: {
+    groups: {
+      liveness: ['process'],
+      readiness: ['diskSpace'],
+    },
+  },
+});
+```
+
+`preset` is **never inferred automatically** from `NODE_ENV` — it must be set explicitly, so upgrading the library can't silently disable endpoints in an existing deployment. If `NODE_ENV=production` is detected without an explicit `preset`, a console warning suggests setting one.
+
+You can also disable endpoints individually instead of using a preset:
 
 ```ts
 const actuator = new NodeActuator({
@@ -53,6 +72,7 @@ const actuator = new NodeActuator({
   env: { enabled: false },
   threadDump: { enabled: false },
   heapDump: { enabled: false },
+  loggers: { enabled: false },
   prometheus: { enabled: true },
 });
 ```
@@ -96,6 +116,9 @@ console.log(`Actuator running on port ${port}`);
 //   GET  /actuator/threaddump   → Thread dump
 //   POST /actuator/heapdump     → Heap dump
 //   GET  /actuator/prometheus   → Prometheus metrics
+//   GET  /actuator/loggers      → List loggers
+//   GET  /actuator/loggers/ROOT → Single logger
+//   POST /actuator/loggers/ROOT → Change level at runtime
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
@@ -120,6 +143,7 @@ const env = actuator.getEnv();
 const threadDump = actuator.getThreadDump();
 const heapDump = await actuator.getHeapDump();
 const prometheus = await actuator.getPrometheus();
+const loggers = actuator.loggers.collect();
 const discovery = actuator.discovery();
 ```
 
@@ -297,6 +321,18 @@ const actuator = new NodeActuator({
 // NODE_ENV → 'production' (not masked)
 ```
 
+### Connection-String Masking
+
+Values that look like connection strings are parsed and only the credential segment is masked, regardless of whether the variable name matches a mask pattern — the host and database name stay visible, which is often what you want for debugging:
+
+```ts
+// DATABASE_URL=postgres://user:hunter2@db.internal:5432/orders
+// → postgres://user:******@db.internal:5432/orders
+
+// REDIS_URL=redis://:hunter2@cache.internal:6379
+// → redis://:******@cache.internal:6379
+```
+
 ### Runtime Mask Management
 
 ```ts
@@ -330,6 +366,7 @@ console.log(dump.mainThread.cpuUsage); // { user, system } in microseconds
 console.log(dump.mainThread.stackTrace); // Current call stack
 console.log(dump.eventLoop.activeHandles); // { count, types }
 console.log(dump.eventLoop.activeRequests); // { count, types }
+console.log(dump.eventLoop.utilization); // { idle, active, utilization, delta } — Event Loop Utilization (ELU)
 console.log(dump.memory);              // process.memoryUsage()
 console.log(dump.v8HeapStats);         // v8.getHeapStatistics()
 console.log(dump.v8HeapSpaces);        // v8.getHeapSpaceStatistics()
@@ -447,6 +484,68 @@ const registry = actuator.prometheus.getRegistry();
 // Reset all metrics (useful in tests)
 await actuator.prometheus.reset();
 ```
+
+### Injecting an Existing Registry
+
+If your app already has a `prom-client` `Registry` (e.g. shared with other instrumentation), pass it in instead of letting the actuator create its own:
+
+```ts
+import { Registry } from 'prom-client';
+
+const registry = new Registry();
+const actuator = new NodeActuator({
+  serverless: true,
+  prometheus: { registry },
+});
+```
+
+---
+
+## Loggers
+
+`GET /actuator/loggers` lists every logger; `GET /actuator/loggers/{name}` reads one; `POST /actuator/loggers/{name}` changes a level at runtime. The built-in logger is always registered as `ROOT`.
+
+```ts
+// List all loggers and their levels
+const loggers = actuator.loggers.collect();
+// → { levels: ['TRACE','DEBUG','INFO','WARN','ERROR','OFF'], loggers: { ROOT: { configuredLevel: 'WARN', effectiveLevel: 'WARN' } } }
+
+// Read one logger
+actuator.loggers.getLogger('ROOT');
+
+// Change a level at runtime
+actuator.loggers.setLevel('ROOT', 'DEBUG');
+```
+
+Over HTTP:
+
+```bash
+curl http://localhost:8081/actuator/loggers
+curl -X POST http://localhost:8081/actuator/loggers/ROOT \
+  -H 'Content-Type: application/json' \
+  -d '{"configuredLevel":"DEBUG"}'
+```
+
+### External Logger Adapters
+
+Register an adapter to manage an external logging library the same way:
+
+```ts
+import { NodeActuator, PinoLoggerAdapter, WinstonLoggerAdapter, BunyanLoggerAdapter } from 'node-actuator-lite';
+
+const actuator = new NodeActuator({ serverless: true });
+
+actuator.loggers.addAdapter(new PinoLoggerAdapter(pinoLogger));
+actuator.loggers.addAdapter(new WinstonLoggerAdapter(winstonLogger));
+actuator.loggers.addAdapter(new BunyanLoggerAdapter(bunyanLogger));
+
+// Remove an adapter (the built-in 'builtin' adapter cannot be removed)
+actuator.loggers.removeAdapter('pino');
+```
+
+With more than one adapter registered, logger names are qualified as `{adapter}:{logger}` (e.g. `pino:ROOT`, `winston:ROOT`) everywhere — `collect()`, `getLogger()`, `setLevel()`, and the HTTP endpoints.
+
+`OFF` truly silences Pino (`level: 'silent'`), Winston (`silent: true`), and Bunyan (level set above `FATAL`) — logs at any severity, including errors, are suppressed.
 
 ---
 
@@ -640,6 +739,10 @@ const actuator = new NodeActuator({
   basePath: '/actuator',    // URL prefix for all endpoints (default: '/actuator')
   serverless: false,        // Skip HTTP server, use programmatic API only (default: false)
 
+  // Safety preset — 'production' disables /env, /threaddump, /heapdump, /loggers,
+  // /dashboard and hides health details. Never inferred from NODE_ENV automatically.
+  preset: undefined,        // 'production' | 'development' | undefined (default: undefined)
+
   // Health
   health: {
     enabled: true,            // Enable health endpoint (default: true)
@@ -695,6 +798,12 @@ const actuator = new NodeActuator({
     defaultMetrics: true,     // Collect Node.js default metrics (default: true)
     prefix: '',               // Label prefix for all metrics (default: '')
     customMetrics: [],        // Custom metric definitions (see Prometheus section above)
+    registry: undefined,      // Inject an existing prom-client Registry (default: creates its own)
+  },
+
+  // Loggers
+  loggers: {
+    enabled: true,            // Enable loggers endpoint (default: true)
   },
 });
 ```
@@ -727,3 +836,4 @@ const actuator = new NodeActuator({
 | `actuator.prometheus` | `PrometheusCollector` | Register/remove metrics, access registry |
 | `actuator.threadDump` | `ThreadDumpCollector` | Collect thread info |
 | `actuator.heapDump` | `HeapDumpCollector` | Generate snapshots |
+| `actuator.loggers` | `LoggersCollector` | List loggers, change levels, add/remove adapters |

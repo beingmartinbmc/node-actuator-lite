@@ -3,6 +3,16 @@ import type { ActuatorOptions } from '../core/types';
 
 type KoaMiddleware = (ctx: any, next: () => Promise<any>) => Promise<void>;
 
+/**
+ * Strict base-path check: returns true when `url` is exactly `base` or starts
+ * with `base` followed by '/' or '?'. Prevents '/actuator' matching '/actuatorish'.
+ */
+function isUnderBasePath(url: string, base: string): boolean {
+  if (!url.startsWith(base)) return false;
+  const next = url[base.length];
+  return next === undefined || next === '/' || next === '?';
+}
+
 export interface ActuatorKoaResult {
   /** Mount this on your Koa app: `app.use(result.middleware)` */
   middleware: KoaMiddleware;
@@ -33,7 +43,7 @@ export function actuatorKoa(options: ActuatorOptions = {}): ActuatorKoaResult {
     const url: string = ctx.originalUrl || ctx.url || ctx.path || '';
     const method: string = (ctx.method || 'GET').toUpperCase();
 
-    if (!url.startsWith(basePath)) return next();
+    if (!isUnderBasePath(url, basePath)) return next();
 
     const subPath = url.slice(basePath.length).split('?')[0] || '/';
     const query: Record<string, string> = ctx.query || {};
@@ -54,6 +64,8 @@ export function actuatorKoa(options: ActuatorOptions = {}): ActuatorKoaResult {
         return;
       }
 
+      // Operational endpoints must not be cached.
+      ctx.set('Cache-Control', 'no-store');
       ctx.status = result.status;
       if (result.contentType === 'text') {
         ctx.type = 'text/plain; charset=utf-8';

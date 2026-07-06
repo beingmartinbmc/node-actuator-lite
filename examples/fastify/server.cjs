@@ -22,16 +22,13 @@ app.addHook('preHandler', async (request, reply) => {
 app.get('/', async () => ({ service: 'fastify-example', status: 'ok' }));
 
 app.register(actuatorPlugin, {
+  preset: 'production',
   health: {
-    showDetails: 'never',
     groups: {
       liveness: ['process'],
       readiness: ['diskSpace'],
     },
   },
-  env: { enabled: false },
-  threadDump: { enabled: false },
-  heapDump: { enabled: false },
   prometheus: { defaultMetrics: true },
 });
 

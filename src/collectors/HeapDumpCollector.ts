@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, statSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, statSync, writeFileSync, createWriteStream } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import v8 from 'v8';
@@ -31,8 +31,6 @@ export class HeapDumpCollector {
   // ---------------------------------------------------------------------------
 
   async collect(): Promise<HeapDumpResponse> {
-    // Guard against event-loop-blocking DoS: v8.writeHeapSnapshot is synchronous
-    // and proportional to heap size. Reject concurrent or too-frequent requests.
     if (this.inProgress) {
       throw new HeapDumpThrottledError('A heap dump is already in progress');
     }
@@ -57,7 +55,7 @@ export class HeapDumpCollector {
       const filename = `heapdump-${ts}-${id}.heapsnapshot`;
       const filePath = join(this.outputDir, filename);
 
-      this.writeSnapshot(filePath);
+      await this.writeSnapshotAsync(filePath);
 
       const memoryAfter = process.memoryUsage();
       const stats = statSync(filePath);
@@ -82,11 +80,38 @@ export class HeapDumpCollector {
   // Internals
   // ---------------------------------------------------------------------------
 
-  private writeSnapshot(filePath: string): void {
+  /**
+   * Non-blocking async heap dump using v8.getHeapSnapshot() which returns a
+   * readable stream. This keeps the event loop unblocked while the snapshot
+   * is piped to disk, unlike the synchronous v8.writeHeapSnapshot().
+   */
+  private async writeSnapshotAsync(filePath: string): Promise<void> {
     try {
-      // v8.writeHeapSnapshot writes synchronously and returns the filename
+      const snapshotStream = v8.getHeapSnapshot();
+      const fileStream = createWriteStream(filePath);
+
+      await new Promise<void>((resolve, reject) => {
+        snapshotStream.pipe(fileStream);
+        fileStream.on('finish', resolve);
+        fileStream.on('error', reject);
+        snapshotStream.on('error', reject);
+      });
+
+      logger.info('Heap snapshot written asynchronously via stream', { filePath });
+    } catch (err: any) {
+      logger.warn('Async heap snapshot failed, falling back to sync write', { error: err.message });
+      this.writeSnapshotSync(filePath);
+    }
+  }
+
+  /**
+   * Synchronous fallback using v8.writeHeapSnapshot(). Used when getHeapSnapshot
+   * streaming fails for any reason.
+   */
+  private writeSnapshotSync(filePath: string): void {
+    try {
       v8.writeHeapSnapshot(filePath);
-      logger.info('Heap snapshot written via v8.writeHeapSnapshot', { filePath });
+      logger.info('Heap snapshot written via v8.writeHeapSnapshot (sync fallback)', { filePath });
     } catch (err: any) {
       logger.warn('v8.writeHeapSnapshot failed, generating manual dump', { error: err.message });
       this.writeFallbackDump(filePath);

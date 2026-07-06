@@ -1,3 +1,5 @@
+import type { Registry } from 'prom-client';
+
 // ============================================================================
 // Configuration Types
 // ============================================================================
@@ -29,10 +31,34 @@ export interface ActuatorLogger {
   error(msg: string, data?: unknown): void;
 }
 
+/**
+ * Safety preset. Determines which endpoints are enabled by default:
+ *
+ * - `'development'` — everything on (current behaviour). Suitable for local dev.
+ * - `'production'`  — only `/health`, `/info`, `/metrics`, `/prometheus` on by
+ *   default; `/env`, `/threaddump`, `/heapdump`, `/loggers`, `/dashboard` off.
+ *   Health details are hidden (`showDetails: 'never'`).
+ *
+ * Explicit per-endpoint `enabled` settings always override the preset.
+ * `preset` is never inferred automatically — endpoint defaults never change
+ * on their own just because `NODE_ENV=production` is set, so upgrading this
+ * library can't silently disable endpoints in an existing deployment. When
+ * `NODE_ENV=production` is detected without an explicit `preset`, a warning
+ * is logged suggesting `preset: 'production'`. A separate warning is also
+ * logged when sensitive endpoints are enabled without an `auth` callback.
+ */
+export type ActuatorPreset = 'production' | 'development';
+
 export interface ActuatorOptions {
   port?: number;
   basePath?: string;
   serverless?: boolean;
+
+  /**
+   * Safety preset. When set to `'production'`, sensitive endpoints are disabled
+   * by default and health details are hidden. See {@link ActuatorPreset}.
+   */
+  preset?: ActuatorPreset;
 
   /** Optional authorization callback applied to every endpoint. */
   auth?: AuthCallback;
@@ -48,6 +74,8 @@ export interface ActuatorOptions {
   prometheus?: PrometheusConfig;
   /** Built-in HTML dashboard served at `<basePath>/dashboard`. Enabled by default. */
   dashboard?: { enabled?: boolean };
+  /** Dynamic loggers endpoint (list/change log levels at runtime). Enabled by default. */
+  loggers?: { enabled?: boolean };
   endpoints?: CustomEndpointRegistration[];
 }
 
@@ -100,6 +128,13 @@ export interface PrometheusConfig {
   defaultMetrics?: boolean;
   prefix?: string;
   customMetrics?: CustomMetricDefinition[];
+  /**
+   * Optional custom prom-client Registry instance. When provided, all actuator
+   * metrics are registered to this registry instead of creating a new isolated
+   * one. This prevents name collisions when the host application already uses
+   * prom-client with its own registry.
+   */
+  registry?: Registry;
 }
 
 export interface CustomMetricDefinition {
@@ -183,6 +218,12 @@ export interface ThreadDumpResponse {
   eventLoop: {
     activeHandles: { count: number; types: string[] };
     activeRequests: { count: number; types: string[] };
+    utilization?: {
+      idle: number;
+      active: number;
+      utilization: number;
+      delta: { idle: number; active: number; utilization: number } | null;
+    };
   };
   workers: Array<{
     threadId: number;
@@ -290,9 +331,11 @@ export interface ResolvedActuatorOptions {
     defaultMetrics: boolean;
     prefix: string;
     customMetrics: CustomMetricDefinition[];
+    registry?: Registry;
   };
 
   dashboard: { enabled: boolean };
+  loggers: { enabled: boolean };
 
   endpoints: CustomEndpointRegistration[];
 }

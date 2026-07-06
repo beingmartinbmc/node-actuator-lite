@@ -113,6 +113,152 @@ describe('environment allowlist', () => {
   });
 });
 
+describe('safety preset', () => {
+  const originalNodeEnv = process.env['NODE_ENV'];
+
+  afterEach(() => {
+    if (originalNodeEnv === undefined) delete process.env['NODE_ENV'];
+    else process.env['NODE_ENV'] = originalNodeEnv;
+  });
+
+  test('preset: "production" disables sensitive endpoints and hides health details', () => {
+    const actuator = new NodeActuator({ serverless: true, preset: 'production' });
+    const opts = (actuator as any).opts as ResolvedActuatorOptions;
+
+    expect(opts.env.enabled).toBe(false);
+    expect(opts.threadDump.enabled).toBe(false);
+    expect(opts.heapDump.enabled).toBe(false);
+    expect(opts.loggers.enabled).toBe(false);
+    expect(opts.dashboard.enabled).toBe(false);
+    expect(opts.health.showDetails).toBe('never');
+  });
+
+  test('preset: "production" keeps health/info/metrics/prometheus enabled by default', () => {
+    const actuator = new NodeActuator({ serverless: true, preset: 'production' });
+    const opts = (actuator as any).opts as ResolvedActuatorOptions;
+
+    expect(opts.health.enabled).toBe(true);
+    expect(opts.info.enabled).toBe(true);
+    expect(opts.metrics.enabled).toBe(true);
+    expect(opts.prometheus.enabled).toBe(true);
+  });
+
+  test('explicit per-endpoint settings override the production preset', () => {
+    const actuator = new NodeActuator({
+      serverless: true,
+      preset: 'production',
+      env: { enabled: true },
+    });
+    const opts = (actuator as any).opts as ResolvedActuatorOptions;
+    expect(opts.env.enabled).toBe(true);
+  });
+
+  test('preset: "development" (explicit) enables everything regardless of NODE_ENV', () => {
+    process.env['NODE_ENV'] = 'production';
+    const actuator = new NodeActuator({ serverless: true, preset: 'development' });
+    const opts = (actuator as any).opts as ResolvedActuatorOptions;
+
+    expect(opts.env.enabled).toBe(true);
+    expect(opts.threadDump.enabled).toBe(true);
+    expect(opts.heapDump.enabled).toBe(true);
+    expect(opts.loggers.enabled).toBe(true);
+    expect(opts.dashboard.enabled).toBe(true);
+    expect(opts.health.showDetails).toBe('always');
+  });
+
+  test('NODE_ENV=production alone does NOT auto-disable endpoints (opt-in required)', () => {
+    // Auto-flipping defaults from NODE_ENV would silently disable endpoints
+    // for existing deployments on upgrade — preset must be explicit.
+    process.env['NODE_ENV'] = 'production';
+    const actuator = new NodeActuator({ serverless: true });
+    const opts = (actuator as any).opts as ResolvedActuatorOptions;
+
+    expect(opts.env.enabled).toBe(true);
+    expect(opts.dashboard.enabled).toBe(true);
+    expect(opts.health.showDetails).toBe('always');
+  });
+
+  test('defaults to development behaviour when NODE_ENV is not production', () => {
+    process.env['NODE_ENV'] = 'test';
+    const actuator = new NodeActuator({ serverless: true });
+    const opts = (actuator as any).opts as ResolvedActuatorOptions;
+
+    expect(opts.env.enabled).toBe(true);
+    expect(opts.dashboard.enabled).toBe(true);
+  });
+
+  test('warns (but does not change defaults) when NODE_ENV=production has no explicit preset', () => {
+    process.env['NODE_ENV'] = 'production';
+    const warnings: string[] = [];
+    logger.setDelegate({
+      trace: () => {}, debug: () => {}, info: () => {}, error: () => {},
+      warn: (m: string) => warnings.push(m),
+    });
+
+    new NodeActuator({ serverless: true });
+
+    expect(warnings.some((m) => m.includes("NODE_ENV=production detected but no 'preset' was set"))).toBe(true);
+  });
+
+  test('does not emit the NODE_ENV nudge warning once preset is explicit', () => {
+    process.env['NODE_ENV'] = 'production';
+    const warnings: string[] = [];
+    logger.setDelegate({
+      trace: () => {}, debug: () => {}, info: () => {}, error: () => {},
+      warn: (m: string) => warnings.push(m),
+    });
+
+    new NodeActuator({ serverless: true, preset: 'production' });
+
+    expect(warnings.some((m) => m.includes('NODE_ENV=production detected'))).toBe(false);
+  });
+
+  test('warns when sensitive endpoints are enabled without an auth callback', () => {
+    const warnings: string[] = [];
+    logger.setDelegate({
+      trace: () => {},
+      debug: () => {},
+      info: () => {},
+      warn: (m: string) => warnings.push(m),
+      error: () => {},
+    });
+
+    new NodeActuator({ serverless: true });
+
+    expect(warnings.some((m) => m.includes('Sensitive endpoints enabled without auth'))).toBe(true);
+  });
+
+  test('does not warn when an auth callback is configured', () => {
+    const warnings: string[] = [];
+    logger.setDelegate({
+      trace: () => {},
+      debug: () => {},
+      info: () => {},
+      warn: (m: string) => warnings.push(m),
+      error: () => {},
+    });
+
+    new NodeActuator({ serverless: true, auth: () => true });
+
+    expect(warnings.some((m) => m.includes('Sensitive endpoints enabled without auth'))).toBe(false);
+  });
+
+  test('does not warn when preset: "production" disables all sensitive endpoints', () => {
+    const warnings: string[] = [];
+    logger.setDelegate({
+      trace: () => {},
+      debug: () => {},
+      info: () => {},
+      warn: (m: string) => warnings.push(m),
+      error: () => {},
+    });
+
+    new NodeActuator({ serverless: true, preset: 'production' });
+
+    expect(warnings.some((m) => m.includes('Sensitive endpoints enabled without auth'))).toBe(false);
+  });
+});
+
 describe('pluggable logger', () => {
   test('setDelegate routes actuator log output to a custom logger', () => {
     const calls: Array<[string, string]> = [];

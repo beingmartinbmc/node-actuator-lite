@@ -21,16 +21,13 @@ function protectActuator(req, res, next) {
 }
 
 const { handler, actuator } = actuatorMiddleware({
+  preset: 'production',
   health: {
-    showDetails: 'never',
     groups: {
       liveness: ['process'],
       readiness: ['diskSpace'],
     },
   },
-  env: { enabled: false },
-  threadDump: { enabled: false },
-  heapDump: { enabled: false },
   prometheus: { defaultMetrics: true },
 });
 

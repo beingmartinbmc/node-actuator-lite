@@ -28,6 +28,7 @@ watchdog.start({
 //    indicator backed by watchdog stats, and an info contributor showing
 //    which ecosystem packages are wired up.
 const { handler, actuator } = actuatorMiddleware({
+  preset: 'production',
   health: {
     showDetails: 'always',
     custom: [
@@ -64,9 +65,6 @@ const { handler, actuator } = actuatorMiddleware({
       },
     ],
   },
-  env: { enabled: false },
-  threadDump: { enabled: false },
-  heapDump: { enabled: false },
   prometheus: { defaultMetrics: true },
 });
 

@@ -71,4 +71,4 @@ After hitting `/stall` a few times, look at:
 - One-line wiring of three independent packages into a unified observability surface.
 - Cross-package integration: watchdog block events automatically include the active request id, route, and method captured by `node-request-trace`.
 - Custom actuator endpoints, info contributors, and health indicators powered by ecosystem data.
-- Production-safe defaults: env, thread dump, and heap dump are disabled; ops routes are bearer-token protected.
+- Production-safe defaults via `preset: 'production'`: env, thread dump, heap dump, loggers, and the dashboard are disabled; ops routes are bearer-token protected.

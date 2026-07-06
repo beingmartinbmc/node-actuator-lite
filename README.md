@@ -8,8 +8,64 @@
 Spring Boot Actuator for Node.js — lightweight monitoring endpoints, a built-in dashboard, and a single runtime dependency.
 
 <p align="center">
-  <img src="./assets/banner.png" alt="node-actuator-lite — Spring Boot Actuator for Node.js" width="900" />
+  <img src="https://raw.githubusercontent.com/beingmartinbmc/node-actuator-lite/main/assets/banner.png" alt="node-actuator-lite — Spring Boot Actuator for Node.js" width="900" />
 </p>
+
+```bash
+npm install node-actuator-lite
+```
+
+### Express (10 lines)
+
+```typescript
+import express from 'express';
+import { actuatorMiddleware } from 'node-actuator-lite';
+
+const app = express();
+const { handler } = actuatorMiddleware();
+app.use(handler);
+app.listen(3000, () => console.log('http://localhost:3000/actuator'));
+```
+
+### Fastify (10 lines)
+
+```typescript
+import Fastify from 'fastify';
+import { actuatorPlugin } from 'node-actuator-lite';
+
+const app = Fastify();
+await app.register(actuatorPlugin);
+await app.listen({ port: 3000 });
+console.log('http://localhost:3000/actuator');
+```
+
+> Requires **Node.js >= 18**. The only runtime dependency is `prom-client`.
+>
+> **CJS/ESM:** The package ships CommonJS (`require`). If you use ES modules, either import from `'node-actuator-lite'` (Node resolves the CJS export) or use a bundler that handles CJS interop. A dual ESM build is on the roadmap.
+
+## Spring Boot Actuator Parity
+
+| Spring Boot Endpoint | node-actuator-lite | Status |
+|---------------------|--------------------|--------|
+| `/actuator` (discovery) | ✅ | Shipped |
+| `/actuator/health` | ✅ (shallow/deep, groups, custom indicators) | Shipped |
+| `/actuator/info` | ✅ (build + runtime + contributors) | Shipped |
+| `/actuator/env` | ✅ (masked, allowlist, connection-string aware) | Shipped |
+| `/actuator/metrics` | ✅ (process JSON + Prometheus) | Shipped |
+| `/actuator/prometheus` | ✅ (prom-client, custom metrics) | Shipped |
+| `/actuator/threaddump` | ✅ (event-loop, handles, ELU, workers) | Shipped |
+| `/actuator/heapdump` | ✅ (async, throttled) | Shipped |
+| `/actuator/loggers` | ✅ (Pino/Winston/Bunyan, runtime level change) | Shipped |
+| `/actuator/mappings` | 🗺️ Route inventory | Roadmap |
+| `/actuator/httpexchanges` | 🗺️ Recent request history | Roadmap |
+| `/actuator/caches` | — | Not planned |
+| `/actuator/beans` | — | N/A (no DI container) |
+| `/actuator/conditions` | — | N/A (no auto-config) |
+| `/actuator/configprops` | — | N/A |
+| `/actuator/flyway` / `liquibase` | — | N/A |
+| `/actuator/sessions` | — | Not planned |
+| `/actuator/scheduledtasks` | 🗺️ | Roadmap |
+| `/actuator/shutdown` | 🗺️ Graceful shutdown | Roadmap |
 
 ## Why?
 
@@ -23,7 +79,8 @@ If you're coming from Spring Boot, you expect `/actuator/health`, `/actuator/inf
 - **Environment** — `process.env` as Spring-style property sources, with automatic sensitive-value masking and an optional allowlist.
 - **Thread Dump** — event-loop state, active handles/requests, V8 heap stats, and worker threads.
 - **Heap Dump** — V8 heap snapshots saved to disk, throttled to prevent abuse.
-- **Prometheus** — all default Node.js metrics plus custom counters, gauges, histograms, and summaries via `prom-client`.
+- **Prometheus** — all default Node.js metrics plus custom counters, gauges, histograms, and summaries via `prom-client`, or inject your app's existing `Registry` to avoid duplicate registrations.
+- **Loggers** — Spring Boot-style `/actuator/loggers`: list every logger and change levels at runtime, with adapters for Pino, Winston, and Bunyan.
 - **Dashboard** — a self-contained HTML page at `/actuator/dashboard` that surfaces every enabled endpoint.
 - **Discovery** — `GET /actuator` lists all enabled endpoints, just like Spring Boot.
 - **Custom endpoints** — register your own routes under `/actuator`, per instance or globally.
@@ -33,31 +90,40 @@ If you're coming from Spring Boot, you expect `/actuator/health`, `/actuator/inf
 
 ## Production Safety
 
-Actuator endpoints expose operational data. Keep them on a private network, behind authentication, or disabled unless you explicitly need them. This matters most for `/actuator/env`, `/actuator/threaddump`, and `/actuator/heapdump`.
+Actuator endpoints expose operational data. In production, use the `preset: 'production'` option to disable sensitive endpoints by default, or gate everything behind an `auth` callback.
 
-A sensible public-facing baseline locks down the sensitive endpoints and gates everything behind an auth callback:
+`preset` is **never inferred automatically** — endpoint defaults never change just because `NODE_ENV=production` is set, so upgrading this library can't silently disable endpoints in an existing deployment. If `NODE_ENV=production` is detected without an explicit `preset`, a console warning suggests setting `preset: 'production'`. A separate warning is emitted whenever sensitive endpoints are enabled without an `auth` callback.
 
 ```typescript
 import { NodeActuator } from 'node-actuator-lite';
 
+// Explicit production preset — safest option:
 const actuator = new NodeActuator({
   port: 8081,
+  preset: 'production',
   auth: ({ raw }) => true, // replace with a real token/allowlist check
   health: {
-    showDetails: 'never',
     groups: {
       liveness: ['process'],
       readiness: ['diskSpace'],
     },
   },
-  env: { enabled: false },
-  threadDump: { enabled: false },
-  heapDump: { enabled: false },
   prometheus: { enabled: true },
 });
 ```
 
-For the framework adapters, mount the actuator behind your existing auth or network allowlist, and enable `env`, `threaddump`, or `heapdump` only for trusted operators during short-lived debugging sessions.
+**Production preset** disables: `/env`, `/threaddump`, `/heapdump`, `/loggers`, `/dashboard`.  
+**Production preset** enables: `/health` (shallow only), `/info`, `/metrics`, `/prometheus`.
+
+You can still override individual endpoints:
+
+```typescript
+new NodeActuator({
+  preset: 'production',
+  env: { enabled: true }, // explicitly opt in
+  auth: checkBearerToken,
+});
+```
 
 ## Installation
 
@@ -201,6 +267,9 @@ All endpoints live under the configured `basePath` (default `/actuator`). Each r
 | GET | `/actuator/threaddump` | Thread / event-loop dump |
 | POST | `/actuator/heapdump` | Generate and save a V8 heap snapshot |
 | GET | `/actuator/prometheus` | Prometheus metrics (text exposition format) |
+| GET | `/actuator/loggers` | List all loggers and their levels |
+| GET | `/actuator/loggers/{name}` | Single logger's level |
+| POST | `/actuator/loggers/{name}` | Change a logger's level at runtime (`{ "configuredLevel": "DEBUG" }`) |
 
 ## Dashboard
 
@@ -221,6 +290,13 @@ interface ActuatorOptions {
   port?: number;            // default 0 (random); standalone server only
   basePath?: string;        // default '/actuator'
   serverless?: boolean;     // default false
+
+  /**
+   * Safety preset. 'production' disables /env, /threaddump, /heapdump,
+   * /loggers, /dashboard and hides health details by default. Never inferred
+   * from NODE_ENV automatically — see "Production Safety" above.
+   */
+  preset?: 'production' | 'development';
 
   /** Authorization callback applied to every endpoint. Return false → 401. */
   auth?: (ctx: {
@@ -296,10 +372,15 @@ interface ActuatorOptions {
       labels?: string[];
       buckets?: number[];   // histogram only
     }>;
+    /** Inject an existing prom-client Registry instead of creating a new one. */
+    registry?: import('prom-client').Registry;
   };
 
   /** Built-in HTML dashboard at `<basePath>/dashboard`. Enabled by default. */
   dashboard?: { enabled?: boolean };
+
+  /** Dynamic loggers endpoint (list/change log levels at runtime). Enabled by default. */
+  loggers?: { enabled?: boolean };
 
   /** Custom endpoints mounted under basePath. */
   endpoints?: Array<{
@@ -465,7 +546,49 @@ const actuator = new NodeActuator({
 }
 ```
 
-For defence-in-depth in production, set `env.mask.allowlist` so that **only** named variables are exposed and everything else is omitted entirely.
+For defence-in-depth in production, set `env.mask.allowlist` so that **only** named variables are exposed and everything else is omitted entirely. Values that look like connection strings (`postgres://user:pass@host/db`, `mongodb+srv://...`, `redis://...`, etc.) have only the password segment masked — the host and database name stay visible for debugging, even when the key itself matches a mask pattern.
+
+## Prometheus
+
+`GET /actuator/prometheus` exposes metrics in Prometheus text format, backed by [`prom-client`](https://www.npmjs.com/package/prom-client) — the library's one runtime dependency.
+
+If your app already runs its own `prom-client` `Registry`, inject it so actuator metrics land in the same registry instead of creating a second, isolated one:
+
+```typescript
+import { Registry } from 'prom-client';
+
+const registry = new Registry();
+const actuator = new NodeActuator({ prometheus: { registry } });
+```
+
+## Loggers
+
+`GET /actuator/loggers` lists every known logger and its level; `POST /actuator/loggers/{name}` changes one at runtime — handy for turning on `DEBUG` in production without a redeploy.
+
+```bash
+curl http://localhost:8081/actuator/loggers
+curl http://localhost:8081/actuator/loggers/ROOT
+curl -X POST http://localhost:8081/actuator/loggers/ROOT \
+  -H 'Content-Type: application/json' \
+  -d '{"configuredLevel":"DEBUG"}'
+```
+
+The built-in logger (`ROOT`) is wired up out of the box. To manage an external logging library at runtime, register an adapter:
+
+```typescript
+import { PinoLoggerAdapter, WinstonLoggerAdapter, BunyanLoggerAdapter } from 'node-actuator-lite';
+
+// Pino
+actuator.loggers.addAdapter(new PinoLoggerAdapter(pinoLogger));
+
+// Winston — OFF maps to Winston's `silent` flag (Winston has no silent level)
+actuator.loggers.addAdapter(new WinstonLoggerAdapter(winstonLogger));
+
+// Bunyan — OFF sets a level above FATAL so nothing is emitted
+actuator.loggers.addAdapter(new BunyanLoggerAdapter(bunyanLogger));
+```
+
+With more than one adapter registered, logger names are qualified as `{adapter}:{logger}` (e.g. `pino:ROOT`) in `GET /actuator/loggers` and in the `POST` body's target name.
 
 ## Heap Dump
 
@@ -610,6 +733,12 @@ await actuator.getHeapDump();
 
 // Prometheus
 await actuator.getPrometheus();
+
+// Loggers
+actuator.loggers.collect();                          // list all loggers
+actuator.loggers.getLogger('ROOT');
+actuator.loggers.setLevel('ROOT', 'DEBUG');
+actuator.loggers.addAdapter(new PinoLoggerAdapter(pinoLogger));
 
 // Custom endpoints
 actuator.registerEndpoint({ id: 'build', handler: () => ({ commit: 'abc' }) });

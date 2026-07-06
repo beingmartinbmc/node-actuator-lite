@@ -38,6 +38,7 @@ describe('actuatorMiddleware', () => {
       info: { enabled: false },
       metrics: { enabled: false },
       dashboard: { enabled: false },
+      loggers: { enabled: false },
     });
     const req = { originalUrl: url, url, method, query: {} };
     const res = createMockResponse();
@@ -375,6 +376,7 @@ describe('actuatorPlugin', () => {
       info: { enabled: false },
       metrics: { enabled: false },
       dashboard: { enabled: false },
+      loggers: { enabled: false },
     });
 
     expect(fastify.routes).toEqual([{ method: 'GET', path: '/actuator' }]);
@@ -415,11 +417,22 @@ describe('actuatorPlugin', () => {
 
     await actuatorPlugin(fastify, { prometheus: { defaultMetrics: false } });
 
-    await expect(handlers['GET /actuator']!()).resolves.toHaveProperty('_links');
-    await expect(handlers['GET /actuator/info']!()).resolves.toHaveProperty('runtime');
-    await expect(handlers['GET /actuator/metrics']!()).resolves.toHaveProperty('process');
-    await expect(handlers['GET /actuator/env']!()).resolves.toHaveProperty('propertySources');
-    await expect(handlers['GET /actuator/threaddump']!()).resolves.toHaveProperty('pid', process.pid);
+    const fakeReq = { query: {}, params: {}, raw: {} };
+
+    const discoveryResult = await handlers['GET /actuator']!(fakeReq, createFastifyReply());
+    expect(discoveryResult).toHaveProperty('_links');
+
+    const infoResult = await handlers['GET /actuator/info']!(fakeReq, createFastifyReply());
+    expect(infoResult).toHaveProperty('runtime');
+
+    const metricsResult = await handlers['GET /actuator/metrics']!(fakeReq, createFastifyReply());
+    expect(metricsResult).toHaveProperty('process');
+
+    const envResult = await handlers['GET /actuator/env']!(fakeReq, createFastifyReply());
+    expect(envResult).toHaveProperty('propertySources');
+
+    const tdResult = await handlers['GET /actuator/threaddump']!(fakeReq, createFastifyReply());
+    expect(tdResult).toHaveProperty('pid', process.pid);
   });
 
   test('Fastify route handlers set reply status and content type branches', async () => {
@@ -563,6 +576,7 @@ function createFastifyReply() {
     statusCode: 200,
     contentType: undefined,
     body: undefined,
+    headers: {} as Record<string, string>,
   };
   reply.code = jest.fn((code: number) => {
     reply.statusCode = code;
@@ -574,6 +588,10 @@ function createFastifyReply() {
   });
   reply.type = jest.fn((contentType: string) => {
     reply.contentType = contentType;
+    return reply;
+  });
+  reply.header = jest.fn((name: string, value: string) => {
+    reply.headers[name] = value;
     return reply;
   });
   return reply;

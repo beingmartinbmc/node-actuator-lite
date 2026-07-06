@@ -58,7 +58,7 @@ export function html(body: string, status = 200): ActuatorRouteResult {
   return { status, contentType: 'html', body };
 }
 
-/** Spring-style mapping: UP → 200, anything else → 503. */
+/** Spring-style mapping: UP -> 200, anything else -> 503. */
 export function healthStatusCode(status: string): number {
   return status === 'UP' ? 200 : 503;
 }
@@ -66,11 +66,27 @@ export function healthStatusCode(status: string): number {
 /** Compile a descriptor path containing `:param` segments into a matcher. */
 export function compilePath(path: string): { regex: RegExp; paramNames: string[] } {
   const paramNames: string[] = [];
-  const regexStr = path.replace(/:([^/]+)/g, (_m, name: string) => {
-    paramNames.push(name);
-    return '([^/]+)';
-  });
-  return { regex: new RegExp(`^${regexStr}$`), paramNames };
+  // Split on :param segments. Escape regex metacharacters in literal parts
+  // to prevent injection (e.g. a path with dots or parens).
+  const segments = path.split(/(:([^/]+))/);
+  let regexStr = '';
+  for (let i = 0; i < segments.length; i += 3) {
+    const literal = segments[i];
+    if (literal) {
+      regexStr += escapeRegex(literal);
+    }
+    const paramName = segments[i + 2];
+    if (paramName) {
+      paramNames.push(paramName);
+      regexStr += '([^/]+)';
+    }
+  }
+  return { regex: new RegExp('^' + regexStr + '$'), paramNames };
+}
+
+/** Escape characters that have special meaning in a regular expression. */
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**

@@ -249,4 +249,58 @@ describe('ActuatorServer', () => {
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ method: 'POST', path: '/echo' });
   });
+
+  // ===========================================================================
+  // JSON request body parsing
+  // ===========================================================================
+
+  test('POST body is parsed as JSON and exposed on req.body', async () => {
+    baseUrl = await startServer();
+    server.post('/echo-body', (req, res) => {
+      res.json({ body: req.body });
+    });
+
+    const res = await fetch(`${baseUrl}/echo-body`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ configuredLevel: 'DEBUG' }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ body: { configuredLevel: 'DEBUG' } });
+  });
+
+  test('POST with no body resolves req.body to undefined', async () => {
+    baseUrl = await startServer();
+    server.post('/echo-body', (req, res) => {
+      res.json({ body: req.body ?? null });
+    });
+
+    const res = await fetch(`${baseUrl}/echo-body`, { method: 'POST' });
+    expect(await res.json()).toEqual({ body: null });
+  });
+
+  test('POST with invalid JSON body resolves req.body to undefined instead of erroring', async () => {
+    baseUrl = await startServer();
+    server.post('/echo-body', (req, res) => {
+      res.json({ body: req.body ?? null });
+    });
+
+    const res = await fetch(`${baseUrl}/echo-body`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'not json',
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ body: null });
+  });
+
+  test('GET requests never wait on a body (no Content-Length)', async () => {
+    baseUrl = await startServer();
+    server.get('/no-body', (req, res) => {
+      res.json({ body: req.body ?? null });
+    });
+
+    const res = await fetch(`${baseUrl}/no-body`);
+    expect(await res.json()).toEqual({ body: null });
+  });
 });

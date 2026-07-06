@@ -7,7 +7,7 @@ import { actuatorHttp } from '../src/middleware/http';
 
 describe('actuatorKoa', () => {
   function createCtx(url: string, method = 'GET') {
-    return {
+    const ctx: any = {
       originalUrl: url,
       url,
       method,
@@ -17,7 +17,10 @@ describe('actuatorKoa', () => {
       status: 404,
       type: undefined as string | undefined,
       body: undefined as unknown,
+      headers: {} as Record<string, string>,
     };
+    ctx.set = (name: string, value: string) => { ctx.headers[name] = value; };
+    return ctx;
   }
 
   test('passes non-actuator requests to next', async () => {
@@ -104,7 +107,8 @@ describe('actuatorKoa', () => {
   test('falls back across ctx url fields and missing query/request', async () => {
     const { middleware } = actuatorKoa({ prometheus: { defaultMetrics: false } });
     // Only `path` present (no originalUrl/url); no query; no request object.
-    const ctx: any = { path: '/actuator/info', method: 'get', req: {}, status: 404 };
+    const ctx: any = { path: '/actuator/info', method: 'get', req: {}, status: 404, headers: {} };
+    ctx.set = (n: string, v: string) => { ctx.headers[n] = v; };
 
     await middleware(ctx, jest.fn());
 
@@ -115,7 +119,8 @@ describe('actuatorKoa', () => {
   test('uses ctx.url when originalUrl absent and defaults method', async () => {
     const { middleware } = actuatorKoa({ prometheus: { defaultMetrics: false } });
     // No originalUrl (url middle branch), no method (defaults to GET), no req.
-    const ctx: any = { url: '/actuator/info', query: {}, request: { body: {} }, status: 404 };
+    const ctx: any = { url: '/actuator/info', query: {}, request: { body: {} }, status: 404, headers: {} };
+    ctx.set = (n: string, v: string) => { ctx.headers[n] = v; };
 
     await middleware(ctx, jest.fn());
 

@@ -147,7 +147,16 @@ export function renderDashboard(basePath: string): string {
     });
   }
   refresh();
-  setInterval(refresh, 5000);
+  var refreshTimer = setInterval(refresh, 5000);
+  // Gate polling on tab visibility — avoid needless load when backgrounded.
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') {
+      refresh();
+      if (!refreshTimer) refreshTimer = setInterval(refresh, 5000);
+    } else {
+      if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+    }
+  });
 })();
 </script>
 </body>
