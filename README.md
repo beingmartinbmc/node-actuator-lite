@@ -39,7 +39,7 @@ await app.listen({ port: 3000 });
 console.log('http://localhost:3000/actuator');
 ```
 
-> Requires **Node.js >= 18**. The only runtime dependency is `prom-client`.
+> Requires **Node.js >= 22**. The only runtime dependency is `prom-client`.
 >
 > **CJS/ESM:** The package ships CommonJS (`require`). If you use ES modules, either import from `'node-actuator-lite'` (Node resolves the CJS export) or use a bundler that handles CJS interop. A dual ESM build is on the roadmap.
 
@@ -131,7 +131,7 @@ new NodeActuator({
 npm install node-actuator-lite
 ```
 
-> Requires **Node.js >= 18**. The only runtime dependency is `prom-client`.
+> Requires **Node.js >= 22**. The only runtime dependency is `prom-client`.
 
 ## Quick Start
 

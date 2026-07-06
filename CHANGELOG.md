@@ -17,6 +17,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- **Breaking:** minimum supported Node.js version raised from 18 to **22**. CI matrix now tests 22 and 24 only; `@types/node` bumped to match. Node 18/20 CI runs were dropped after both intermittently hung on `HeapDumpCollector`'s stream error path (see Fixed).
 - `/actuator` dispatch uses a cached, pre-compiled endpoint table instead of rebuilding routes and regexes on every request.
 - `HealthCollector` stores indicators in a `Map` instead of an array for O(1) lookups; health-group checks now run in parallel.
 - Heap dumps are generated asynchronously via a streamed `v8.getHeapSnapshot()` instead of the event-loop-blocking `v8.writeHeapSnapshot()`, with a synchronous fallback if streaming fails.
@@ -30,6 +31,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - `POST /actuator/loggers/{name}` now works on the standalone server and the `node:http` adapter. Both now parse JSON request bodies — previously `ctx.body` was always `undefined` outside the Express/Fastify/Koa adapters, so every request failed with `configuredLevel is required`.
 - `LoggerLevel.OFF` now truly silences Winston (`silent: true`) and Bunyan (level set above `FATAL`) instead of mapping to `error`/`fatal`, which still emitted logs at severe levels.
+- `HeapDumpCollector`'s async snapshot write now uses `stream/promises`' `pipeline()` instead of manual `.pipe()` + event listeners, fixing inconsistent error propagation when the `v8.getHeapSnapshot()` stream errors (could resolve as if the write had succeeded, or hang, depending on Node version).
 
 ### Documentation
 
