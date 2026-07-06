@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, statSync, writeFileSync, createWriteStream } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
+import { pipeline } from 'stream/promises';
 import v8 from 'v8';
 import { logger } from '../utils/logger';
 import type { HeapDumpResponse, ResolvedActuatorOptions } from '../core/types';
@@ -84,19 +85,18 @@ export class HeapDumpCollector {
    * Non-blocking async heap dump using v8.getHeapSnapshot() which returns a
    * readable stream. This keeps the event loop unblocked while the snapshot
    * is piped to disk, unlike the synchronous v8.writeHeapSnapshot().
+   *
+   * Uses stream/promises' pipeline() rather than manual .pipe() + event
+   * listeners: pipeline() guarantees consistent error propagation and
+   * destroys both streams on failure across Node versions, whereas raw
+   * .pipe() does not forward source errors to the destination and its
+   * error-timing relative to 'finish' is not guaranteed.
    */
   private async writeSnapshotAsync(filePath: string): Promise<void> {
     try {
       const snapshotStream = v8.getHeapSnapshot();
       const fileStream = createWriteStream(filePath);
-
-      await new Promise<void>((resolve, reject) => {
-        snapshotStream.pipe(fileStream);
-        fileStream.on('finish', resolve);
-        fileStream.on('error', reject);
-        snapshotStream.on('error', reject);
-      });
-
+      await pipeline(snapshotStream, fileStream);
       logger.info('Heap snapshot written asynchronously via stream', { filePath });
     } catch (err: any) {
       logger.warn('Async heap snapshot failed, falling back to sync write', { error: err.message });

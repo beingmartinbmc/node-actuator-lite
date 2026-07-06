@@ -14,8 +14,12 @@ jobs:
     runs-on: ubuntu-latest
 
     strategy:
+      # Run every Node version to completion instead of cancelling siblings
+      # the moment one fails — a single flaky/version-specific failure
+      # shouldn't hide results from the others.
+      fail-fast: false
       matrix:
-        node-version: [18, 20, 22]
+        node-version: [18, 20, 22, 24]
 
     steps:
       - uses: actions/checkout@v4
