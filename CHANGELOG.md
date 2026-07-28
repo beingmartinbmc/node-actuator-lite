@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning.
 
+## 4.1.0 - 2026-07-28
+
+### Changed
+
+- **Node.js 18 and 20 are supported again.** `engines.node` is back to `>=18.0.0`. 4.0.0 raised the floor to 22 because the test suite intermittently hung on Node 18/20, but that hang was a test-harness bug rather than a runtime incompatibility — see Fixed. The library was verified against Node 18.20.8, 20.19.5, 22.23.1, and 24.15.0: full suite green (380 tests) on all four, plus a runtime check of the programmatic API, standalone server, `node:http` adapter, Express middleware, and the heap-dump path against a packed tarball.
+
+### Fixed
+
+- A stalled `v8.getHeapSnapshot()` stream no longer hangs `HeapDumpCollector.collect()` forever. The stream is now piped under an abort signal and falls back to the synchronous writer if it produces nothing within 60 seconds. Previously such a stall never rejected, so the `finally` that clears `inProgress` never ran and **every subsequent heap dump was rejected with "A heap dump is already in progress" for the remaining life of the process**.
+- `tests/security-features.test.ts` mocked `v8.writeHeapSnapshot` but not `v8.getHeapSnapshot`, so its heap-dump throttling tests exercised the real V8 streaming snapshot. That stalled indefinitely inside a jest worker on Node 20 and failed on Node 22. Both snapshot APIs are now mocked, matching `tests/heap-dump-collector.test.ts`. This also removes the leaked handle that made the suite require `--forceExit`, and cuts the full run from roughly 60 seconds to under 3.
+
+### Documentation
+
+- README rewritten from 792 lines to 171: leads with the pitch and a real screenshot of the dashboard, adds a factual comparison against `@godaddy/terminus`, `lightship`, and `express-actuator` (including what they do better), and defers the full option reference to `USAGE.md` instead of duplicating it.
+- Removed the incorrect note claiming ESM consumers need a bundler or a future dual build. Named ESM imports already resolve through Node's CommonJS interop and are verified in a `type: module` package.
+- Added `assets/dashboard.png`, a real screenshot of `/actuator/dashboard`, and `assets/social-preview.png` at GitHub's 1280x640 social-preview size. `assets/banner.png` was recompressed from 1.63 MB to 340 KB so it fits under GitHub's 1 MB social-preview upload limit.
+
 ## 4.0.0 - 2026-07-06
 
 ### Added
