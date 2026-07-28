@@ -108,5 +108,6 @@ heapdumps/
 # Test output files
 test-output.txt
 
-# Editor-local rules
+# Editor-local rules and local code-index caches
 .cursor/
+.jambavan/
