@@ -3,7 +3,21 @@ import { HeapDumpCollector, HeapDumpThrottledError } from '../src/collectors/Hea
 import { EnvironmentCollector } from '../src/collectors/EnvironmentCollector';
 import { logger } from '../src/utils/logger';
 import type { ResolvedActuatorOptions } from '../src/core/types';
+import { Readable } from 'stream';
 import v8 from 'v8';
+
+// Both snapshot APIs must be mocked. A real v8.getHeapSnapshot() stream can
+// stall indefinitely inside a jest worker (reproducible on Node 20), and since
+// it never errors the sync fallback below is never reached.
+jest.spyOn(v8, 'getHeapSnapshot').mockImplementation(() => {
+  const stream = new Readable({
+    read() {
+      this.push('{"mock":"heapdump-stream"}');
+      this.push(null);
+    },
+  });
+  return stream as any;
+});
 
 jest.spyOn(v8, 'writeHeapSnapshot').mockImplementation((filePath?: string) => {
   if (filePath) require('fs').writeFileSync(filePath, '{"mock":"heapdump"}');

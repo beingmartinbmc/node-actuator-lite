@@ -6,6 +6,15 @@ import v8 from 'v8';
 import { logger } from '../utils/logger';
 import type { HeapDumpResponse, ResolvedActuatorOptions } from '../core/types';
 
+/**
+ * Upper bound on the streaming snapshot before falling back to the sync API.
+ * ponytail: fixed rather than configurable — it exists to catch a permanent
+ * stall, not to enforce latency, so it is set well above a legitimate
+ * multi-gigabyte dump. If someone reports a real heap that needs longer,
+ * promote it to `heapDump.streamTimeoutMs`.
+ */
+const SNAPSHOT_STREAM_TIMEOUT_MS = 60_000;
+
 /** Thrown when a heap dump is rejected due to throttling or concurrency limits. */
 export class HeapDumpThrottledError extends Error {
   readonly retryAfterMs: number | undefined;
@@ -91,12 +100,25 @@ export class HeapDumpCollector {
    * destroys both streams on failure across Node versions, whereas raw
    * .pipe() does not forward source errors to the destination and its
    * error-timing relative to 'finish' is not guaranteed.
+   *
+   * The pipeline is bounded by an abort signal. A getHeapSnapshot() stream can
+   * stall without ever emitting an error — observed under a jest worker on
+   * Node 20 — and an unbounded await would leave `inProgress` pinned, which
+   * rejects every later dump with "already in progress" for the life of the
+   * process. On timeout we abort the stream and fall back to the sync API,
+   * which uses a different V8 entry point and generally still succeeds.
    */
   private async writeSnapshotAsync(filePath: string): Promise<void> {
     try {
       const snapshotStream = v8.getHeapSnapshot();
       const fileStream = createWriteStream(filePath);
-      await pipeline(snapshotStream, fileStream);
+      const abort = new AbortController();
+      const timer = setTimeout(() => abort.abort(), SNAPSHOT_STREAM_TIMEOUT_MS);
+      try {
+        await pipeline(snapshotStream, fileStream, { signal: abort.signal });
+      } finally {
+        clearTimeout(timer);
+      }
       logger.info('Heap snapshot written asynchronously via stream', { filePath });
     } catch (err: any) {
       logger.warn('Async heap snapshot failed, falling back to sync write', { error: err.message });

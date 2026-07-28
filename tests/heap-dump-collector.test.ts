@@ -111,6 +111,31 @@ describe('HeapDumpCollector', () => {
     expect(existsSync(result.filePath)).toBe(true);
   });
 
+  test('a stalled snapshot stream is aborted and falls back to the sync writer', async () => {
+    // A stream that never pushes and never errors — the shape that used to
+    // hang collect() forever and pin `inProgress` for the rest of the process.
+    (v8.getHeapSnapshot as jest.Mock).mockImplementationOnce(
+      () => new Readable({ read() { /* intentionally never pushes */ } }),
+    );
+
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] });
+    try {
+      const hdc = new HeapDumpCollector(makeConfig());
+      const pending = hdc.collect();
+      await jest.advanceTimersByTimeAsync(60_000);
+      const result = await pending;
+
+      const content = require('fs').readFileSync(result.filePath, 'utf8');
+      expect(JSON.parse(content)).toEqual({ mock: 'heapdump-sync' });
+
+      // The collector must be usable again rather than stuck "in progress".
+      const after = await hdc.collect();
+      expect(existsSync(after.filePath)).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   test('fallback is used when both getHeapSnapshot and writeHeapSnapshot throw', async () => {
     (v8.getHeapSnapshot as jest.Mock).mockImplementationOnce(() => {
       throw new Error('stream not supported');
